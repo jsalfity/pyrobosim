@@ -69,6 +69,13 @@ def main() -> None:
     if args.task_id:
         tasks = [t for t in tasks if t.get("id") == args.task_id]
 
+    # For headless_per_run mode, use the existing control server
+    # (start it manually with: python3 -m pyrobosim.mcp.sim_app --world-file <world>)
+    # This ensures identical execution behavior with GUI mode (critical for paper accuracy)
+    if execution_mode == "headless_per_run":
+        log(f"Headless mode: using existing control server at {control_url}", "info")
+        log("Ensure server is running: python3 -m pyrobosim.mcp.sim_app --world-file roscon_2024_workshop_world.yaml", "info")
+
     for task in tasks:
         task_id = task.get("id")
         print("")
@@ -136,61 +143,27 @@ def main() -> None:
 
         robot_name = config.get("robot_name", "robot")
         if execution_mode == "headless_per_run":
-            log("Running BT headless in a fresh process...", "info")
-            headless_cmd = [
-                "python3",
-                str((root_dir / "run_bt_headless.py").resolve()),
-                "--bt-file",
-                str(bt_path),
-                "--world-file",
-                config.get("world_file", "test_world.yaml"),
-                "--robot",
-                robot_name,
-                "--timeout-s",
-                str(timeout_s),
-                "--tick-period-s",
-                str(tick_period_s),
-                "--progress-interval-s",
-                str(args.headless_progress_interval_s),
-            ]
-            subprocess_timeout_s = timeout_s + 20
-            import pdb;pdb.set_trace()
-            try:
-                completed = subprocess.run(
-                    headless_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=None,
-                    text=True,
-                    timeout=subprocess_timeout_s,
-                )
-                log(f"Headless process exited rc={completed.returncode}", "info")
-            except subprocess.TimeoutExpired:
-                log(f"Headless process timeout after {subprocess_timeout_s}s", "error")
-                exec_result = {
-                    "exec_status": "ERROR",
-                    "error": f"headless subprocess timeout ({subprocess_timeout_s}s)",
-                }
-                pre_state = {}
-                post_state = {}
-                completed = None
+            # Use control server execution (identical to GUI mode)
+            # This ensures headless results match GUI behavior exactly for paper accuracy
+            log("Running BT headless via control server (GUI execution path)...", "info")
 
-            if completed is not None and completed.returncode != 0:
-                exec_result = {
-                    "exec_status": "ERROR",
-                    "error": f"headless runner exited with code {completed.returncode}",
-                }
-                pre_state = {}
-                post_state = {}
-            elif completed is not None:
-                log("Parsing headless JSON payload...", "info")
-                payload = extract_json_payload(completed.stdout)
-                pre_state = payload.get("pre_state", {})
-                post_state = payload.get("post_state", {})
-                exec_result = {
-                    "exec_status": payload.get("exec_status"),
-                    "runtime_ms": payload.get("runtime_ms"),
-                    "tick_count": payload.get("tick_count"),
-                }
+            # Reset world state for this run
+            if hard_reset_between:
+                log("Hard resetting world...", "warn")
+                reload_world(control_url)
+            elif reset_between:
+                log("Resetting world...", "warn")
+                reset_world(control_url)
+
+            # Get pre-execution world state
+            pre_state = get_world_state(control_url, robot_name)
+
+            # Run BT via control server (same as GUI mode)
+            log("Running BT...", "info")
+            exec_result = run_bt_control(bt, control_url, robot_name, timeout_s)
+
+            # Get post-execution world state
+            post_state = get_world_state(control_url, robot_name)
         else:
             if hard_reset_between:
                 log("Hard resetting world...", "warn")

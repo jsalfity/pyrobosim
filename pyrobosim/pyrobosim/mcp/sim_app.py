@@ -174,6 +174,8 @@ class SimContext:
         self.world = new_world
         if gui is not None:
             gui.set_world(new_world)
+            # Reinitialize robot visualization including sensor artists
+            gui.canvas.show_robots()
         return True
 
 
