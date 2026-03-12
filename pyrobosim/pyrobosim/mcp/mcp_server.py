@@ -31,7 +31,7 @@ except ImportError as exc:  # pragma: no cover - runtime guard
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GENERATED_DIR = Path(__file__).resolve().parent.parent / "behaviors" / "generated"
-DEFAULT_EVAL_LOG = REPO_ROOT / "eval" / "submissions.jsonl"
+DEFAULT_EVAL_LOG = REPO_ROOT / "eval" / "submissions_mcore.jsonl"
 DEFAULT_CONTROL_URL = os.getenv("PYROBOSIM_CONTROL_URL", "http://127.0.0.1:9001")
 
 
@@ -41,6 +41,9 @@ class ServerValidationConfig:
     expose_validate_tool: bool = True
     check_vocabulary: bool = True
     expose_rootstocks: bool = False
+    submission_file: Path = DEFAULT_EVAL_LOG
+    restrict_control_flow: bool = False
+    bt_subdir: str = ""  # Subdirectory for generated BTs (e.g., "b2_sequence" -> generated/b2_sequence/)
 
 
 def build_mcp(config: ServerValidationConfig | None = None) -> FastMCP:
@@ -53,7 +56,7 @@ def build_mcp(config: ServerValidationConfig | None = None) -> FastMCP:
 
     @mcp.tool()
     def get_bt_format() -> dict[str, Any]:
-        return get_bt_schema()
+        return get_bt_schema(restrict_control_flow=cfg.restrict_control_flow)
 
     @mcp.tool()
     def send_to_robot(
@@ -74,9 +77,16 @@ def build_mcp(config: ServerValidationConfig | None = None) -> FastMCP:
         if cfg.send_static_enforce and not valid:
             raise ValueError(f"Validation failed: {issues}")
 
-        GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-        name = _sanitize_name(output_name or f"bt_{uuid.uuid4().hex}")
-        generated_path = GENERATED_DIR / f"{name}.json"
+        # Determine output directory (with optional subdirectory for baseline separation)
+        output_dir = GENERATED_DIR / cfg.bt_subdir if cfg.bt_subdir else GENERATED_DIR
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename with hash to avoid collisions across runs
+        base_name = _sanitize_name(output_name or f"bt_{uuid.uuid4().hex}")
+        run_hash = uuid.uuid4().hex[:6]  # Short 6-char hash for this run
+        name = f"{base_name}_{run_hash}" if output_name else base_name
+
+        generated_path = output_dir / f"{name}.json"
         generated_path.write_text(json.dumps(bt_data, indent=2), encoding="utf-8")
 
         submission_id = uuid.uuid4().hex
@@ -89,12 +99,12 @@ def build_mcp(config: ServerValidationConfig | None = None) -> FastMCP:
         }
         if token_usage:
             record["token_usage"] = token_usage
-        append_record(DEFAULT_EVAL_LOG, record)
+        append_record(cfg.submission_file, record)
 
         return {
             "submission_id": submission_id,
             "generated": generated_rel,
-            "logged": str(DEFAULT_EVAL_LOG),
+            "logged": str(cfg.submission_file),
             "static_validation": {
                 "enabled": True,
                 "valid": valid,
@@ -160,7 +170,7 @@ def build_mcp(config: ServerValidationConfig | None = None) -> FastMCP:
 
     @mcp.resource("mcp://pyrobosim/bt_schema")
     def bt_schema_resource() -> dict[str, Any]:
-        return get_bt_schema()
+        return get_bt_schema(restrict_control_flow=cfg.restrict_control_flow)
 
     if cfg.expose_rootstocks:
         @mcp.resource("mcp://pyrobosim/rootstocks")
@@ -355,13 +365,41 @@ def main() -> None:
         action="store_true",
         help="Expose rootstocks tool/resource to clients.",
     )
+    parser.add_argument(
+        "--submission-file",
+        type=str,
+        default=None,
+        help=f"Path to submissions log (default: {DEFAULT_EVAL_LOG})",
+    )
+    parser.add_argument(
+        "--restrict-control-flow",
+        action="store_true",
+        help="Restrict BT schema to sequence-only (no selector/parallel/decorator) for B2 baseline.",
+    )
+    parser.add_argument(
+        "--bt-subdir",
+        type=str,
+        default="",
+        help="Subdirectory for generated BTs (e.g., 'b2_sequence' creates generated/b2_sequence/)",
+    )
     args = parser.parse_args()
+
+    # Resolve submission file path relative to repo root if not absolute
+    if args.submission_file:
+        submission_path = Path(args.submission_file)
+        if not submission_path.is_absolute():
+            submission_path = REPO_ROOT / submission_path
+    else:
+        submission_path = DEFAULT_EVAL_LOG
 
     config = ServerValidationConfig(
         send_static_enforce=not args.no_send_static_enforce,
         expose_validate_tool=not args.disable_validate_tool,
         check_vocabulary=not args.disable_vocabulary_check,
         expose_rootstocks=args.enable_rootstocks,
+        submission_file=submission_path,
+        restrict_control_flow=args.restrict_control_flow,
+        bt_subdir=args.bt_subdir,
     )
     mcp = build_mcp(config)
     mcp.run(transport=args.transport, host=args.host, port=args.port)

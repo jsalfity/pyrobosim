@@ -33,6 +33,16 @@ def main() -> None:
     parser.add_argument("--step", action="store_true", help="Pause between tasks.")
     parser.add_argument("--submission-id", help="Evaluate a specific submission id.")
     parser.add_argument(
+        "--submission-file",
+        default="submissions_mcore.jsonl",
+        help="Submissions file to load (default: submissions_mcore.jsonl)",
+    )
+    parser.add_argument(
+        "--output-file",
+        default="results.json",
+        help="Output results file (default: results.json)",
+    )
+    parser.add_argument(
         "--headless-progress-interval-s",
         type=float,
         default=2.0,
@@ -46,7 +56,7 @@ def main() -> None:
     world_locations = get_world_location_names(config.get("world_file"))
 
     bt_dir = Path(repo_root / config.get("bt_output_dir", ""))
-    submissions = load_submissions(root_dir / "submissions.jsonl")
+    submissions = load_submissions(root_dir / args.submission_file)
     control_url = config.get("control_server", "http://127.0.0.1:9001")
     execution_mode = config.get("execution_mode", "control_server")
     runtime_cfg = config.get("runtime", {})
@@ -58,9 +68,9 @@ def main() -> None:
     skills = get_skill_schemas()
 
     results: list[dict[str, Any]] = []
-    out_path = root_dir / (f"{args.task_id}_results.json" if args.task_id else "results.json")
+    out_path = root_dir / (f"{args.task_id}_results.json" if args.task_id else args.output_file)
     log(f"Loaded {len(config.get('tasks', []))} tasks", "info")
-    log(f"Submissions log: {root_dir / 'submissions.jsonl'}", "info")
+    log(f"Submissions log: {root_dir / args.submission_file}", "info")
     log(f"BT output dir: {bt_dir}", "info")
     log(f"Control server: {control_url}", "info")
     log(f"Timeout: {timeout_s}s", "info")
@@ -219,7 +229,9 @@ def main() -> None:
             "trace_comp_rate": rate(rows, "trace_comp"),
         }
 
-    summary_path = root_dir / "results_summary_by_archetype.json"
+    # Derive summary filename from output file (e.g., results.json -> results_summary_by_archetype.json)
+    base_name = Path(args.output_file).stem
+    summary_path = root_dir / f"{base_name}_summary_by_archetype.json"
     summary_path.write_text(json.dumps(summary_out, indent=2), encoding="utf-8")
     log(f"Wrote archetype summary to {summary_path}", "ok")
 
