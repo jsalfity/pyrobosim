@@ -1,0 +1,28 @@
+{
+  "root": {
+    "type": "sequence",
+    "name": "Simple Navigation Test",
+    "memory": true,
+    "children": [
+      {
+        "type": "action",
+        "name": "Go to kitchen",
+        "action": "navigate",
+        "params": {
+          "target_location": "kitchen"
+        }
+      },
+      {
+        "type": "action",
+        "name": "Go to office",
+        "action": "navigate",
+        "params": {
+          "target_location": "office"
+        }
+      }
+    ]
+  },
+  "blackboard": {
+    "initial": {}
+  }
+}
