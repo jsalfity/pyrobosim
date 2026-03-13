@@ -19,6 +19,7 @@ def create_server(
     generated_dir: Path | None = None,
     submission_file: Path | None = None,
     world_file: str | None = None,
+    control_url: str | None = None,
     restrict_control_flow: bool = False,
 ) -> BTMCPServer:
     """
@@ -28,6 +29,7 @@ def create_server(
         generated_dir: Directory to save generated BT JSONs
         submission_file: Path to evaluation submission log (JSONL)
         world_file: Path to world YAML (for vocabulary validation)
+        control_url: URL of sim server for live vocabulary (e.g., http://localhost:9001)
         restrict_control_flow: If True, restrict to sequence-only BTs
 
     Returns:
@@ -44,7 +46,10 @@ def create_server(
     # Create PyRoboSim providers
     skill_provider = PyRoboSimSkillProvider()
     bt_schema_provider = PyRoboSimBTSchemaProvider()
-    world_provider = PyRoboSimWorldProvider(world_file=world_file)
+    world_provider = PyRoboSimWorldProvider(
+        world_file=world_file,
+        control_url=control_url,
+    )
 
     # Server configuration
     config = ServerValidationConfig(
@@ -92,6 +97,11 @@ def main():
         help="Path to world YAML for vocabulary validation",
     )
     parser.add_argument(
+        "--control-url",
+        type=str,
+        help="URL of sim server for live vocabulary (e.g., http://localhost:9001)",
+    )
+    parser.add_argument(
         "--restrict-control-flow",
         action="store_true",
         help="Restrict to sequence-only BTs (no selector/parallel/decorator)",
@@ -134,6 +144,7 @@ def main():
         generated_dir=args.generated_dir,
         submission_file=args.submission_file,
         world_file=world_file,
+        control_url=args.control_url,
         restrict_control_flow=args.restrict_control_flow,
     )
 
@@ -143,6 +154,8 @@ def main():
     print(f"  Submission log: {server.config.submission_file}")
     if args.world_file:
         print(f"  World file: {args.world_file}")
+    if args.control_url:
+        print(f"  Control server: {args.control_url} (live vocabulary)")
     print("\nMCP tools available:")
     print("  - list_skills()")
     print("  - get_bt_format()")

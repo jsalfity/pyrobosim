@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -85,14 +87,16 @@ class PyRoboSimBTSchemaProvider(BTSchemaProvider):
 class PyRoboSimWorldProvider(WorldEntitiesProvider):
     """Provides PyRoboSim world entities (vocabulary) for validation."""
 
-    def __init__(self, world_file: str | None = None):
+    def __init__(self, world_file: str | None = None, control_url: str | None = None):
         """
         Initialize world provider.
 
         Args:
             world_file: Default world file to load for vocabulary
+            control_url: Default URL of sim server for live vocabulary
         """
         self.default_world_file = world_file
+        self.default_control_url = control_url
 
     def get_entities(
         self,
@@ -104,24 +108,44 @@ class PyRoboSimWorldProvider(WorldEntitiesProvider):
         """
         Return world entities for vocabulary validation.
 
-        For now, returns vocab mode only (names/categories, no ground-truth).
-        Future: Can load from world_file or query control_url for full/observed modes.
+        Priority order:
+        1. If control_url provided, query running sim server for live vocabulary
+        2. If world_file provided, load from file
+        3. Fall back to empty vocab
 
         Args:
             mode: "vocab" (names only), "observed" (robot knowledge), "full" (ground truth)
             world_file: Path to world YAML file (optional)
-            control_url: URL to control server (optional)
+            control_url: URL to control server (optional, e.g., http://localhost:9001)
             robot: Robot name (optional)
 
         Returns:
             Dictionary with: rooms, locations, objects, object_categories, etc.
         """
-        # For vocab mode, return world vocabulary
-        # This could be loaded from a world file or queried from a running simulation
+        # Priority 1: Query control server if URL provided
+        control_url = control_url or self.default_control_url
+        if control_url:
+            try:
+                request = urllib.request.Request(
+                    control_url.rstrip("/") + "/world_entities",
+                    data=json.dumps({
+                        "mode": mode,
+                        "robot": robot,
+                        "allow_full": (mode == "full"),
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    data = response.read().decode("utf-8")
+                    return json.loads(data)
+            except Exception as e:
+                # If control server query fails, fall through to file-based approach
+                print(f"Warning: Failed to query control server at {control_url}: {e}")
+                print("Falling back to world file...")
 
-        # Use provided world_file or fall back to default
+        # Priority 2: Load from world file
         world_file = world_file or self.default_world_file
-
         if world_file:
             # Load world and extract vocabulary
             from pyrobosim.core import WorldYamlLoader
@@ -137,7 +161,7 @@ class PyRoboSimWorldProvider(WorldEntitiesProvider):
             world.shutdown()
             return entities
 
-        # Default: return vocab-only mode with no specific world loaded
+        # Priority 3: Default empty vocab
         return {
             "mode": "vocab",
             "rooms": [],
