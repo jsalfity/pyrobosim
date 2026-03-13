@@ -26,7 +26,7 @@ def start_gui(world: World, options: WorldCanvasOptions = WorldCanvasOptions()) 
     """
     app = PyRoboSimGUI(world, sys.argv, options=options)
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 class PyRoboSimGUI(QtWidgets.QApplication):  # type: ignore [misc]
