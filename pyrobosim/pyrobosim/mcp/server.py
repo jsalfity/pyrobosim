@@ -33,12 +33,13 @@ def create_server(
     Returns:
         Configured BTMCPServer instance
     """
-    # Default paths
+    # Default paths - use current working directory (configurable via CLI)
     if generated_dir is None:
-        generated_dir = Path(__file__).resolve().parent.parent / "behaviors" / "generated"
+        generated_dir = Path.cwd() / "generated"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+
     if submission_file is None:
-        repo_root = Path(__file__).resolve().parents[3]
-        submission_file = repo_root / "eval" / "submissions.jsonl"
+        submission_file = Path.cwd() / "submissions.jsonl"
 
     # Create PyRoboSim providers
     skill_provider = PyRoboSimSkillProvider()
@@ -49,7 +50,7 @@ def create_server(
     config = ServerValidationConfig(
         generated_dir=generated_dir,
         submission_file=submission_file,
-        send_static_enforce=True,  # Enforce validation before saving
+        send_static_enforce=False,  # Return validation results gracefully (don't throw error)
         expose_validate_tool=True,  # Expose validation tool
         check_vocabulary=bool(world_file),  # Enable vocab check if world provided
         restrict_control_flow=restrict_control_flow,
@@ -95,17 +96,49 @@ def main():
         action="store_true",
         help="Restrict to sequence-only BTs (no selector/parallel/decorator)",
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for MCP server (default: 8000)",
+    )
 
     args = parser.parse_args()
+
+    # Resolve world file path to absolute if provided
+    world_file = None
+    if args.world_file:
+        world_file_path = Path(args.world_file).expanduser()
+
+        # If not absolute, try relative to current dir first, then PyRoboSim data dir
+        if not world_file_path.is_absolute():
+            if not world_file_path.exists():
+                # Try PyRoboSim data directory
+                from pyrobosim.utils.general import get_data_folder
+                pyrobosim_data_path = get_data_folder() / args.world_file
+                if pyrobosim_data_path.exists():
+                    world_file_path = pyrobosim_data_path
+                else:
+                    print(f"ERROR: World file not found: {args.world_file}")
+                    print(f"  Tried: {Path(args.world_file).resolve()}")
+                    print(f"  Tried: {pyrobosim_data_path}")
+                    return
+
+        world_file_path = world_file_path.resolve()
+        if not world_file_path.exists():
+            print(f"ERROR: World file not found: {world_file_path}")
+            return
+        world_file = str(world_file_path)
 
     server = create_server(
         generated_dir=args.generated_dir,
         submission_file=args.submission_file,
-        world_file=args.world_file,
+        world_file=world_file,
         restrict_control_flow=args.restrict_control_flow,
     )
 
     print("Starting PyRoboSim MCP server...")
+    print(f"  Port: {args.port}")
     print(f"  Generated BTs: {server.config.generated_dir}")
     print(f"  Submission log: {server.config.submission_file}")
     if args.world_file:
@@ -118,7 +151,7 @@ def main():
     print("\nServer running...")
 
     # Run the FastMCP server
-    server.run()
+    server.run(port=args.port)
 
 
 if __name__ == "__main__":
