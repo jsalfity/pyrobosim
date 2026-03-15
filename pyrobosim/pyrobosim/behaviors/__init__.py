@@ -1,6 +1,6 @@
 """Behavior tree utilities for PyRoboSim."""
 
-from .local_bt import (
+from .pytree_json import (
     RobotActionBehavior,
     pyrobosim_action_factory,
     build_pyrobosim_tree_from_json,
