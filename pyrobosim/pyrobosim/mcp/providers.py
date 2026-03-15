@@ -85,89 +85,54 @@ class PyRoboSimBTSchemaProvider(BTSchemaProvider):
 
 
 class PyRoboSimWorldProvider(WorldEntitiesProvider):
-    """Provides PyRoboSim world entities (vocabulary) for validation."""
+    """Provides PyRoboSim world entities (vocabulary) from sim_app server."""
 
-    def __init__(self, world_file: str | None = None, control_url: str | None = None):
+    def __init__(self, control_url: str | None = None):
         """
         Initialize world provider.
 
         Args:
-            world_file: Default world file to load for vocabulary
-            control_url: Default URL of sim server for live vocabulary
+            control_url: URL of sim_app server for live vocabulary
         """
-        self.default_world_file = world_file
         self.default_control_url = control_url
 
     def get_entities(
         self,
         mode: str = "vocab",
-        world_file: str | None = None,
         control_url: str | None = None,
         robot: str | None = None,
     ) -> dict[str, Any]:
         """
-        Return world entities for vocabulary validation.
-
-        Priority order:
-        1. If control_url provided, query running sim server for live vocabulary
-        2. If world_file provided, load from file
-        3. Fall back to empty vocab
+        Return world entities for vocabulary validation from sim_app server.
 
         Args:
             mode: "vocab" (names only), "observed" (robot knowledge), "full" (ground truth)
-            world_file: Path to world YAML file (optional)
-            control_url: URL to control server (optional, e.g., http://localhost:9001)
+            control_url: URL to sim_app server (optional, uses default if not provided)
             robot: Robot name (optional)
 
         Returns:
             Dictionary with: rooms, locations, objects, object_categories, etc.
+
+        Raises:
+            Exception: If sim_app server query fails
         """
-        # Priority 1: Query control server if URL provided
         control_url = control_url or self.default_control_url
-        if control_url:
-            try:
-                request = urllib.request.Request(
-                    control_url.rstrip("/") + "/world_entities",
-                    data=json.dumps({
-                        "mode": mode,
-                        "robot": robot,
-                        "allow_full": (mode == "full"),
-                    }).encode("utf-8"),
-                    headers={"Content-Type": "application/json", "Accept": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(request, timeout=5) as response:
-                    data = response.read().decode("utf-8")
-                    return json.loads(data)
-            except Exception as e:
-                # If control server query fails, fall through to file-based approach
-                print(f"Warning: Failed to query control server at {control_url}: {e}")
-                print("Falling back to world file...")
+        if not control_url:
+            raise ValueError("sim_app URL required for world entities")
 
-        # Priority 2: Load from world file
-        world_file = world_file or self.default_world_file
-        if world_file:
-            # Load world and extract vocabulary
-            from pyrobosim.core import WorldYamlLoader
-            from pyrobosim.mcp.world_entities import build_world_entities as _build_entities
-
-            world = WorldYamlLoader().from_file(world_file)
-            entities = _build_entities(
-                world,
-                mode=mode,
-                robot=world.robots[0] if robot and world.robots else None,
-                allow_full=(mode == "full"),
+        try:
+            request = urllib.request.Request(
+                control_url.rstrip("/") + "/world_entities",
+                data=json.dumps({
+                    "mode": mode,
+                    "robot": robot,
+                    "allow_full": (mode == "full"),
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                method="POST",
             )
-            world.shutdown()
-            return entities
-
-        # Priority 3: Default empty vocab
-        return {
-            "mode": "vocab",
-            "rooms": [],
-            "locations": [],
-            "object_spawns": [],
-            "object_categories": [],
-            "objects": [],
-            "hallways": [],
-        }
+            with urllib.request.urlopen(request, timeout=5) as response:
+                data = response.read().decode("utf-8")
+                return json.loads(data)
+        except Exception as e:
+            raise Exception(f"Failed to query sim_app server at {control_url}: {e}") from e

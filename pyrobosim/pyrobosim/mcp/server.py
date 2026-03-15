@@ -28,8 +28,8 @@ def create_server(
     Args:
         generated_dir: Directory to save generated BT JSONs
         submission_file: Path to evaluation submission log (JSONL)
-        world_file: Path to world YAML (for vocabulary validation)
-        control_url: URL of sim server for live vocabulary (e.g., http://localhost:9001)
+        world_file: Deprecated, not used (vocabulary comes from sim_app)
+        control_url: URL of sim_app server for live vocabulary (e.g., http://localhost:8080)
         restrict_control_flow: If True, restrict to sequence-only BTs
 
     Returns:
@@ -46,10 +46,7 @@ def create_server(
     # Create PyRoboSim providers
     skill_provider = PyRoboSimSkillProvider()
     bt_schema_provider = PyRoboSimBTSchemaProvider()
-    world_provider = PyRoboSimWorldProvider(
-        world_file=world_file,
-        control_url=control_url,
-    )
+    world_provider = PyRoboSimWorldProvider(control_url=control_url)
 
     # Server configuration
     config = ServerValidationConfig(
@@ -57,7 +54,7 @@ def create_server(
         submission_file=submission_file,
         send_static_enforce=False,  # Return validation results gracefully (don't throw error)
         expose_validate_tool=True,  # Expose validation tool
-        check_vocabulary=bool(world_file),  # Enable vocab check if world provided
+        check_vocabulary=bool(control_url),  # Enable vocab check if sim_app URL provided
         restrict_control_flow=restrict_control_flow,
     )
 
@@ -92,14 +89,10 @@ def main():
         help="Path to evaluation submission log (JSONL)",
     )
     parser.add_argument(
-        "--world-file",
+        "--sim-app-url",
         type=str,
-        help="Path to world YAML for vocabulary validation",
-    )
-    parser.add_argument(
-        "--control-url",
-        type=str,
-        help="URL of sim server for live vocabulary (e.g., http://localhost:9001)",
+        required=True,
+        help="URL of sim_app server for live vocabulary (e.g., http://localhost:8080)",
     )
     parser.add_argument(
         "--restrict-control-flow",
@@ -115,36 +108,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Resolve world file path to absolute if provided
-    world_file = None
-    if args.world_file:
-        world_file_path = Path(args.world_file).expanduser()
-
-        # If not absolute, try relative to current dir first, then PyRoboSim data dir
-        if not world_file_path.is_absolute():
-            if not world_file_path.exists():
-                # Try PyRoboSim data directory
-                from pyrobosim.utils.general import get_data_folder
-                pyrobosim_data_path = get_data_folder() / args.world_file
-                if pyrobosim_data_path.exists():
-                    world_file_path = pyrobosim_data_path
-                else:
-                    print(f"ERROR: World file not found: {args.world_file}")
-                    print(f"  Tried: {Path(args.world_file).resolve()}")
-                    print(f"  Tried: {pyrobosim_data_path}")
-                    return
-
-        world_file_path = world_file_path.resolve()
-        if not world_file_path.exists():
-            print(f"ERROR: World file not found: {world_file_path}")
-            return
-        world_file = str(world_file_path)
-
     server = create_server(
         generated_dir=args.generated_dir,
         submission_file=args.submission_file,
-        world_file=world_file,
-        control_url=args.control_url,
+        world_file=None,
+        control_url=args.sim_app_url,
         restrict_control_flow=args.restrict_control_flow,
     )
 
@@ -152,10 +120,7 @@ def main():
     print(f"  Port: {args.port}")
     print(f"  Generated BTs: {server.config.generated_dir}")
     print(f"  Submission log: {server.config.submission_file}")
-    if args.world_file:
-        print(f"  World file: {args.world_file}")
-    if args.control_url:
-        print(f"  Control server: {args.control_url} (live vocabulary)")
+    print(f"  Sim app server: {args.sim_app_url} (live vocabulary)")
     print("\nMCP tools available:")
     print("  - list_skills()")
     print("  - get_bt_format()")
