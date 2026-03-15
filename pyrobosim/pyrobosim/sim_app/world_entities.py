@@ -42,16 +42,12 @@ def build_world_entities(
     # Object spawns (locations where objects can be)
     entities["object_spawns"] = [loc.name for loc in world.locations if loc.is_open]
 
-    # Object categories
-    if world.metadata and hasattr(world.metadata, "object_categories"):
-        entities["object_categories"] = list(world.metadata.object_categories.keys())
-    else:
-        # Extract from existing objects
-        categories = set()
-        for obj in world.objects:
-            if obj.category:
-                categories.add(obj.category)
-        entities["object_categories"] = sorted(categories)
+    # Object categories - extract from existing objects
+    categories = set()
+    for obj in world.objects:
+        if obj.category:
+            categories.add(obj.category)
+    entities["object_categories"] = sorted(categories)
 
     # Objects
     if mode == "observed":
