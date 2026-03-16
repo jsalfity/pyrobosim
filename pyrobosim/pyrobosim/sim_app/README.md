@@ -19,7 +19,7 @@ python -m pyrobosim.sim_app.server --world-file roscon_2024_workshop_world.yaml 
 
 This will:
 - Load the specified world file
-- Start the HTTP control server on port 9001
+- Start the HTTP control server on port 8080
 - Open a GUI window showing the world
 
 ### 2. Execute a Behavior Tree
@@ -167,7 +167,7 @@ Reload world from file.
 ```
 --world-file WORLD_FILE  Path to world YAML file (required)
 --host HOST              Server host (default: 127.0.0.1)
---port PORT              Server port (default: 9001)
+--port PORT              Server port (default: 8080)
 ```
 
 ### Client (`pyrobosim.sim_app.run_bt_client`)
@@ -187,7 +187,7 @@ bt_file                  Path to BT JSON file (required)
 cd /path/to/pyrobosim
 python -m pyrobosim.sim_app.server \
   --world-file roscon_2024_workshop_world.yaml \
-  --port 9001
+  --port 8080
 ```
 
 ### Terminal 2: Execute BT
@@ -216,7 +216,7 @@ python -m pyrobosim.sim_app.server --world-file roscon_2024_workshop_world.yaml
 cd /path/to/bt-eval-harness
 python run_eval.py \
   --tasks-file tasks.yaml \
-  --control-url http://localhost:9001 \
+  --control-url http://localhost:8080 \
   --realtime-factor 10
 ```
 
