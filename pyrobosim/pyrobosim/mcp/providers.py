@@ -37,7 +37,7 @@ class PyRoboSimSkillProvider(SkillProvider):
             formatted = {
                 "name": skill["name"],
                 "description": skill.get("description", ""),
-                "parameters": skill.get("params", {}),
+                "params": skill.get("params", {}),
             }
             if "outputs" in skill:
                 formatted["outputs"] = skill["outputs"]
