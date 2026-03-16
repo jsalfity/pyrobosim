@@ -36,11 +36,8 @@ def build_world_entities(
     # Rooms
     entities["rooms"] = [room.name for room in world.rooms]
 
-    # Locations (includes object spawns)
+    # Locations (navigate to these to interact with objects)
     entities["locations"] = [loc.name for loc in world.locations]
-
-    # Object spawns (locations where objects can be)
-    entities["object_spawns"] = [loc.name for loc in world.locations if loc.is_open]
 
     # Object categories - extract from existing objects
     categories = set()
