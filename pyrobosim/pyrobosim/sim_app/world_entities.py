@@ -38,6 +38,7 @@ def build_world_entities(
 
     # Locations (navigate to these to interact with objects)
     entities["locations"] = [loc.name for loc in world.locations]
+    entities["object_spawns"] = [spawn.name for spawn in world.object_spawns]
 
     # Object categories - extract from existing objects
     categories = set()
