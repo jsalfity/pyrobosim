@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from bt_mcp.providers import BTSchemaProvider, SkillProvider, WorldEntitiesProvider
+from bt_mcp.providers import BTSchemaProvider, RootstocksProvider, SkillProvider, WorldEntitiesProvider
 
 _DATA_DIR = Path(__file__).resolve().parent / "data"
 
@@ -84,6 +84,19 @@ class PyRoboSimBTSchemaProvider(BTSchemaProvider):
         return data
 
 
+class PyRoboSimRootstocksProvider(RootstocksProvider):
+    """Provides PyRoboSim rootstock templates from YAML."""
+
+    def __init__(self, rootstocks_file: Path | None = None):
+        self.rootstocks_file = rootstocks_file or (_DATA_DIR / "rootstocks.yaml")
+
+    def get_rootstocks(self) -> list[dict[str, Any]]:
+        """Load and return rootstock templates from YAML."""
+        data = yaml.safe_load(self.rootstocks_file.read_text(encoding="utf-8"))
+        rootstocks = data.get("rootstocks", []) if isinstance(data, dict) else []
+        return [rootstock for rootstock in rootstocks if isinstance(rootstock, dict) and rootstock.get("name")]
+
+
 class PyRoboSimWorldProvider(WorldEntitiesProvider):
     """Provides PyRoboSim world entities (vocabulary) from sim_app server."""
 
@@ -111,7 +124,7 @@ class PyRoboSimWorldProvider(WorldEntitiesProvider):
             robot: Robot name (optional)
 
         Returns:
-            Dictionary with: rooms, locations, objects, object_categories, etc.
+            Dictionary with: rooms, locations, object_spawns, objects, object_categories, hallways
 
         Raises:
             Exception: If sim_app server query fails

@@ -1,0 +1,175 @@
+rootstocks:
+  - name: detect_pick
+    description: Canonical detect-gated manipulation pattern for direct pick tasks.
+    when_to_use: Use when the task is to go to one location, verify the target object, and pick it.
+    slots:
+      object_query: Object name or category to detect and pick.
+      source_location: Location or object spawn to navigate to before detect and pick.
+      open_before_detect: Set true when the source location can be closed, such as pantry or fridge.
+    anti_pattern: Do not pick before detect succeeds.
+    template:
+      root:
+        type: sequence
+        memory: true
+        children:
+          - type: action
+            name: navigate_to_source
+            action: navigate
+            params:
+              target_location: "{source_location}"
+          - type: action
+            name: open_source
+            action: open
+            enabled_if:
+              slot: open_before_detect
+          - type: action
+            name: detect_target
+            action: detect
+            params:
+              object: "{object_query}"
+          - type: action
+            name: pick_target
+            action: pick
+            params:
+              object: "{object_query}"
+
+  - name: search_pick_selector
+    description: Two-branch selector search pattern with a guarded detect-and-pick branch at each location.
+    when_to_use: Use when the task says to search one location, then fall back to a second location, and pick the object if found.
+    slots:
+      object_query: Object name or category to detect and pick.
+      primary_location: First search location.
+      fallback_location: Second search location.
+      primary_open_before_detect: Set true when the primary location can be closed.
+      fallback_open_before_detect: Set true when the fallback location can be closed.
+    anti_pattern: Do not make the fallback branch a blind navigate-and-pick sequence.
+    template:
+      root:
+        type: selector
+        memory: true
+        children:
+          - type: sequence
+            memory: true
+            children:
+              - type: action
+                name: navigate_primary
+                action: navigate
+                params:
+                  target_location: "{primary_location}"
+              - type: action
+                name: open_primary
+                action: open
+                enabled_if:
+                  slot: primary_open_before_detect
+              - type: action
+                name: detect_primary
+                action: detect
+                params:
+                  object: "{object_query}"
+              - type: action
+                name: pick_primary
+                action: pick
+                params:
+                  object: "{object_query}"
+          - type: sequence
+            memory: true
+            children:
+              - type: action
+                name: navigate_fallback
+                action: navigate
+                params:
+                  target_location: "{fallback_location}"
+              - type: action
+                name: open_fallback
+                action: open
+                enabled_if:
+                  slot: fallback_open_before_detect
+              - type: action
+                name: detect_fallback
+                action: detect
+                params:
+                  object: "{object_query}"
+              - type: action
+                name: pick_fallback
+                action: pick
+                params:
+                  object: "{object_query}"
+
+  - name: search_pick_deliver
+    description: Search with selector fallback, then continue to a delivery step such as place or return.
+    when_to_use: Use when the task says to search across candidate locations and then either place the object somewhere or return to a destination while holding it.
+    slots:
+      object_query: Object name or category to detect and pick.
+      primary_location: First search location.
+      fallback_location: Second search location.
+      destination_location: Delivery destination.
+      delivery_mode: One of place or return.
+      primary_open_before_detect: Set true when the primary location can be closed.
+      fallback_open_before_detect: Set true when the fallback location can be closed.
+    anti_pattern: Do not put delivery actions inside only one selector branch.
+    template:
+      root:
+        type: sequence
+        memory: true
+        children:
+          - type: selector
+            memory: true
+            children:
+              - type: sequence
+                memory: true
+                children:
+                  - type: action
+                    name: navigate_primary
+                    action: navigate
+                    params:
+                      target_location: "{primary_location}"
+                  - type: action
+                    name: open_primary
+                    action: open
+                    enabled_if:
+                      slot: primary_open_before_detect
+                  - type: action
+                    name: detect_primary
+                    action: detect
+                    params:
+                      object: "{object_query}"
+                  - type: action
+                    name: pick_primary
+                    action: pick
+                    params:
+                      object: "{object_query}"
+              - type: sequence
+                memory: true
+                children:
+                  - type: action
+                    name: navigate_fallback
+                    action: navigate
+                    params:
+                      target_location: "{fallback_location}"
+                  - type: action
+                    name: open_fallback
+                    action: open
+                    enabled_if:
+                      slot: fallback_open_before_detect
+                  - type: action
+                    name: detect_fallback
+                    action: detect
+                    params:
+                      object: "{object_query}"
+                  - type: action
+                    name: pick_fallback
+                    action: pick
+                    params:
+                      object: "{object_query}"
+          - type: action
+            name: navigate_destination
+            action: navigate
+            params:
+              target_location: "{destination_location}"
+          - type: action
+            name: place_at_destination
+            action: place
+            enabled_if:
+              slot_equals:
+                slot: delivery_mode
+                value: place

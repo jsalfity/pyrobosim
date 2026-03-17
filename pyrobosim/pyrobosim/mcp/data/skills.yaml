@@ -1,6 +1,6 @@
 skills:
   - name: navigate
-    description: Plan and follow a path to a target location or pose.
+    description: Plan and follow a path to a target location or pose. Use location names from the world vocabulary (e.g., pantry, fridge, table). The robot will automatically navigate to the appropriate position for interacting with objects at that location.
     params:
       target_location:
         type: string
@@ -17,7 +17,7 @@ skills:
     outputs: [status, message, last_nav_result, battery_level]
 
   - name: pick
-    description: Pick up an object at the current location. Constraint is single-arm robot; cannot pick something up while already holding something.
+    description: Pick up an object at the current location. The robot must be at a location where the object is present. Use object names or categories from the world vocabulary. CONSTRAINT - Single-arm robot can only hold one object at a time; cannot pick while already holding something.
     params:
       object:
         type: string
@@ -30,7 +30,7 @@ skills:
     outputs: [status, message, battery_level]
 
   - name: place
-    description: Place the currently held object at the current location.
+    description: Place the currently held object at the current location. The robot must be at a location where objects can be placed (navigate to a location first).
     params:
       pose:
         type: pose
@@ -39,7 +39,7 @@ skills:
     outputs: [status, message, battery_level]
 
   - name: detect
-    description: Detect objects at the current location.
+    description: Detect objects at the current location. The robot must be at a location (navigate there first). If the location can be closed (e.g., pantry, fridge), it must be opened first using the open action. The object parameter can be a specific object name or category from the world vocabulary.
     params:
       object:
         type: string
@@ -48,7 +48,7 @@ skills:
     outputs: [status, message, detected_objects, battery_level]
 
   - name: open
-    description: Open the current location or target location if provided. Constraint is single-arm robot; cannot open while holding an object.
+    description: Open the current location or target location if provided. Certain locations like pantry and fridge must be opened before you can detect or pick objects inside them. CONSTRAINT - Cannot open while holding an object (single-arm robot).
     params:
       target_location:
         type: string
@@ -57,7 +57,7 @@ skills:
     outputs: [status, message, battery_level]
 
   - name: close
-    description: Close the current location or target location if provided. Constraint is single-arm robot; cannot close while holding an object.
+    description: Close the current location or target location if provided. CRITICAL CONSTRAINT - Cannot close while holding an object (single-arm robot). Only close locations when NOT holding anything. If you pick an object from a location, do NOT close it until after you place the object elsewhere.
     params:
       target_location:
         type: string
