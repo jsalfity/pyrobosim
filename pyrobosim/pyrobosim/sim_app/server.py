@@ -128,9 +128,20 @@ class SimContext:
                 _on_tick(count)
                 time.sleep(tick_period_s)
 
+            # Capture failure information
+            failed_node = None
+            if tree.root.status == py_trees.common.Status.FAILURE:
+                # Find the first failed node in the tree
+                for node in tree.root.iterate():
+                    if node.status == py_trees.common.Status.FAILURE:
+                        failed_node = node.name
+                        break
+
             with self.lock:
                 if run_id in self.bt_runs:
                     self.bt_runs[run_id]["status"] = tree.root.status.name
+                    if failed_node:
+                        self.bt_runs[run_id]["failed_node"] = failed_node
 
         with self.lock:
             self.bt_runs[run_id] = {
@@ -139,6 +150,7 @@ class SimContext:
                 "tick_count": 0,
                 "tree": "",
                 "bb_keys": sorted(bb_keys),
+                "failed_node": None,
             }
         thread = threading.Thread(target=_runner, daemon=True)
         thread.start()
@@ -154,12 +166,16 @@ class SimContext:
                 return {"status": "UNKNOWN"}
             blackboard = py_trees.blackboard.Blackboard()
             bb_values = dict(blackboard.storage)
-            return {
+            result = {
                 "status": entry.get("status", "UNKNOWN"),
                 "tick_count": entry.get("tick_count", 0),
                 "tree": entry.get("tree", ""),
                 "blackboard": bb_values,
             }
+            # Add failed node if available
+            if entry.get("failed_node"):
+                result["failed_node"] = entry["failed_node"]
+            return result
 
     def world_state(self, robot_name: str | None = None) -> dict[str, Any]:
         """Get current world state."""
