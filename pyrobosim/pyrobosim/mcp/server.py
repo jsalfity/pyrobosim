@@ -22,6 +22,7 @@ def create_server(
     world_file: str | None = None,
     control_url: str | None = None,
     restrict_control_flow: bool = False,
+    expose_rootstocks: bool = True,
 ) -> BTMCPServer:
     """
     Create PyRoboSim MCP server instance.
@@ -32,6 +33,7 @@ def create_server(
         world_file: Deprecated, not used (vocabulary comes from sim_app)
         control_url: URL of sim_app server for live vocabulary (e.g., http://localhost:8080)
         restrict_control_flow: If True, restrict to sequence-only BTs
+        expose_rootstocks: If True, expose rootstock templates through MCP
 
     Returns:
         Configured BTMCPServer instance
@@ -57,7 +59,7 @@ def create_server(
         send_static_enforce=False,  # Return validation results gracefully (don't throw error)
         expose_validate_tool=True,  # Expose validation tool
         check_vocabulary=bool(control_url),  # Enable vocab check if sim_app URL provided
-        expose_rootstocks=True,
+        expose_rootstocks=expose_rootstocks,
         restrict_control_flow=restrict_control_flow,
     )
 
@@ -104,6 +106,11 @@ def main():
         help="Restrict to sequence-only BTs (no selector/parallel/decorator)",
     )
     parser.add_argument(
+        "--disable-rootstocks",
+        action="store_true",
+        help="Hide rootstock templates from the MCP interface",
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=8000,
@@ -118,6 +125,7 @@ def main():
         world_file=None,
         control_url=args.sim_app_url,
         restrict_control_flow=args.restrict_control_flow,
+        expose_rootstocks=not args.disable_rootstocks,
     )
 
     print("Starting PyRoboSim MCP server...")
@@ -130,7 +138,8 @@ def main():
     print("  - get_bt_format()")
     print("  - send_to_robot(bt_json, ...)")
     print("  - list_world_entities()")
-    print("  - list_rootstocks_tool()")
+    if not args.disable_rootstocks:
+        print("  - list_rootstocks_tool()")
     print("\nServer running...")
 
     # Run the FastMCP server
