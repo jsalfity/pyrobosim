@@ -21,6 +21,7 @@ import argparse
 import json
 import threading
 import uuid
+from enum import IntEnum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,27 @@ from pyrobosim.utils.general import get_data_folder
 
 
 DATA_FOLDER = get_data_folder()
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert runtime objects to JSON-serializable values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, IntEnum):
+        return value.name
+    if isinstance(value, dict):
+        return {str(key): _json_safe(inner) for key, inner in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    status = getattr(value, "status", None)
+    message = getattr(value, "message", None)
+    if status is not None and hasattr(value, "is_success"):
+        return {
+            "status": _json_safe(status),
+            "message": _json_safe(message),
+            "success": bool(value.is_success()),
+        }
+    return repr(value)
 
 
 def _collect_blackboard_keys(node: dict[str, Any], keys: set[str]) -> None:
@@ -165,7 +187,7 @@ class SimContext:
             if not entry:
                 return {"status": "UNKNOWN"}
             blackboard = py_trees.blackboard.Blackboard()
-            bb_values = dict(blackboard.storage)
+            bb_values = _json_safe(dict(blackboard.storage))
             result = {
                 "status": entry.get("status", "UNKNOWN"),
                 "tick_count": entry.get("tick_count", 0),

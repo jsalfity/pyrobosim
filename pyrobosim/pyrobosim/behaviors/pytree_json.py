@@ -116,18 +116,30 @@ def _path_from_list(points: list[dict[str, Any]]) -> Path:
     return Path(poses=poses)
 
 
+def _unwrap_param_value(value: Any) -> Any:
+    """Unwrap MCP-style literal payloads into plain Python values."""
+    if isinstance(value, dict):
+        if set(value.keys()) == {"literal"}:
+            return _unwrap_param_value(value["literal"])
+        return {key: _unwrap_param_value(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_unwrap_param_value(item) for item in value]
+    return value
+
+
 def _build_task_action(action_type: str, params: dict[str, Any]) -> TaskAction:
     """Build PyRoboSim TaskAction from parameters."""
+    normalized = {key: _unwrap_param_value(value) for key, value in params.items()}
     return TaskAction(
         type=action_type,
-        robot=params.get("robot"),
-        object=params.get("object"),
-        room=params.get("room"),
-        source_location=params.get("source_location"),
-        target_location=params.get("target_location"),
-        pose=params.get("pose"),
-        path=params.get("path", Path()),
-        cost=params.get("cost"),
+        robot=normalized.get("robot"),
+        object=normalized.get("object"),
+        room=normalized.get("room"),
+        source_location=normalized.get("source_location"),
+        target_location=normalized.get("target_location"),
+        pose=normalized.get("pose"),
+        path=normalized.get("path", Path()),
+        cost=normalized.get("cost"),
     )
 
 
