@@ -23,13 +23,19 @@ cd generated/$(date +%Y-%m-%d_%H-%M)
 python3 -m pyrobosim.mcp.server --sim-app-url http://localhost:8080
 ```
 
+For pass@1 evaluation runs, also pass `--no-validate-tool` so every BT goes through `send_to_robot` (and is counted as an attempt):
+
+```bash
+python3 -m pyrobosim.mcp.server --sim-app-url http://localhost:8080 --no-validate-tool
+```
+
 The MCP server will:
 - Load skill schemas from `data/skills.yaml`
 - Load BT schema from `data/bt_schema.yaml`
 - Load rootstock BT templates from `data/rootstocks.yaml`
 - Fetch live world vocabulary (rooms, locations, object spawns, objects) from sim_app server
 - Save generated BTs to `jsons/` subdirectory (in current working directory)
-- Log generations to `submissions.jsonl` (in current working directory)
+- Log generations to `submissions.jsonl` with `valid`, `issues`, and `attempt_number` per submission
 
 **Batch Directory Structure:**
 ```
@@ -76,7 +82,8 @@ When connected, Claude can:
 - `get_bt_schema` - Get behavior tree JSON schema
 - `get_world_entities` - Get current world vocabulary (rooms, locations, objects)
 - `list_rootstocks_tool` - Get canonical BT composition templates for common task patterns
-- `validate_bt` - Validate a behavior tree against schema and skills
+- `send_to_robot` - Validate, save, and log a BT; returns `attempt_number` and `static_validation`. Returns `success=false` with `reason="max_attempts_reached"` once the per-session cap (default 10) is hit.
+- `validate_bt` - Validate a behavior tree against schema and skills *(hidden when `--no-validate-tool` is passed)*
 - `execute_bt` - Execute a behavior tree via sim_app server
 
 ## Rootstocks

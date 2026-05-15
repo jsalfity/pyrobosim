@@ -23,6 +23,7 @@ def create_server(
     control_url: str | None = None,
     restrict_control_flow: bool = False,
     expose_rootstocks: bool = True,
+    expose_validate_tool: bool = True,
 ) -> BTMCPServer:
     """
     Create PyRoboSim MCP server instance.
@@ -57,7 +58,7 @@ def create_server(
         generated_dir=generated_dir,
         submission_file=submission_file,
         send_static_enforce=False,  # Return validation results gracefully (don't throw error)
-        expose_validate_tool=True,  # Expose validation tool
+        expose_validate_tool=expose_validate_tool,  # Configurable via CLI flag
         check_vocabulary=bool(control_url),  # Enable vocab check if sim_app URL provided
         expose_rootstocks=expose_rootstocks,
         restrict_control_flow=restrict_control_flow,
@@ -106,9 +107,15 @@ def main():
         help="Restrict to sequence-only BTs (no selector/parallel/decorator)",
     )
     parser.add_argument(
-        "--disable-rootstocks",
+        "--no-rootstocks",
         action="store_true",
         help="Hide rootstock templates from the MCP interface",
+    )
+    parser.add_argument(
+        "--no-validate-tool",
+        action="store_true",
+        help="Hide validate_bt tool from clients (use during @1 eval to force "
+             "every BT through send_to_robot for attempt counting)",
     )
     parser.add_argument(
         "--port",
@@ -125,7 +132,8 @@ def main():
         world_file=None,
         control_url=args.sim_app_url,
         restrict_control_flow=args.restrict_control_flow,
-        expose_rootstocks=not args.disable_rootstocks,
+        expose_rootstocks=not args.no_rootstocks,
+        expose_validate_tool=not args.no_validate_tool,
     )
 
     print("Starting PyRoboSim MCP server...")
@@ -138,7 +146,7 @@ def main():
     print("  - get_bt_format()")
     print("  - send_to_robot(bt_json, ...)")
     print("  - list_world_entities()")
-    if not args.disable_rootstocks:
+    if not args.no_rootstocks:
         print("  - list_rootstocks_tool()")
     print("\nServer running...")
 
