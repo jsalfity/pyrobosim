@@ -10,6 +10,14 @@ Sensor Definitions
 
 The ``pyrobosim/sensors`` module contains all sensor model implementations.
 
+The built-in sensor models are:
+
+* ``Lidar2D``: Simulates 2D lidar scans as rays clipped against the world's obstacles.
+* ``FOVSensor``: Simulates a field-of-view (FOV) object detection sensor as a cone
+  attached to the robot, clipped so it does not extend through walls or closed hallways.
+  If a robot has any FOV sensors, its **Detect** action finds the objects inside the
+  sensors' fields of view instead of the objects at the robot's current location.
+
 
 What to Implement in a Sensor
 ------------------------------
@@ -68,29 +76,28 @@ This will only take effect if your robot is created with the ``start_sensor_thre
                 time.sleep(max(0.0, self.update_rate_s - (t_end - t_start)))
 
 
-For visualization, you can provide ``setup_artists()`` and ``update_artists()`` methods.
+For visualization, you can provide a ``get_display_coords()`` method, which returns
+the line segments (each an iterable of XY points) to display for the sensor.
 
 .. code-block:: python
 
-    from matplotlib.artist import Artist
-    from matplotlib.patches import Circle
-    from matplotlib.transforms import Affine2D
+    import math
+    from typing import Iterable
 
-        def setup_artists(self) -> list[Artist]:
-            """Executes when the sensor is first visualized."""
+        def get_display_coords(self) -> Iterable[Iterable[tuple[float, float]]]:
+            """Returns a circle around the robot as a line segment loop."""
             pose = self.robot.get_pose()
-            self.circle = Circle(
-                (pose.x, pose.y),
-                radius=1.0,
-                color="r",
-            )
-            return [self.circle]
+            angles = [math.radians(deg) for deg in range(0, 361, 10)]
+            return [
+                [
+                    (pose.x + math.cos(angle), pose.y + math.sin(angle))
+                    for angle in angles
+                ]
+            ]
 
-        def update_artists(self) -> None:
-            """Updates the artist as needed."""
-            pose = self.robot.get_pose()
-            new_tform = Affine2D().translate(pose.x, pose.y)
-            self.circle.set_transform(new_tform)
+Similarly, a ``get_display_polygons()`` method returns polygon rings that the UI displays filled in the robot's color.
+This suits sensors that observe a region rather than individual rays (for example, the FOV sensor's cone).
+The UI draws all sensors' line segments and filled polygons for each robot; a sensor can provide either or both.
 
 
 To serialize to file, which is needed to reset the world, you should also implement the ``to_dict()`` method.

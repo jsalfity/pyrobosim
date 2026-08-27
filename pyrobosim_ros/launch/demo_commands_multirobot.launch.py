@@ -11,7 +11,7 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[
             {
                 # Use multirobot file option.
-                "world_file": "test_world_multirobot.yaml"
+                "world_file": "test_world_multirobot.yaml",
             }
         ],
         output="screen",

@@ -44,6 +44,8 @@ def generate_launch_description() -> LaunchDescription:
         executable="demo.py",
         name="demo_world",
         parameters=[{"world_file": LaunchConfiguration("world_file")}],
+        output="screen",
+        emulate_tty=True,
     )
     command_node = Node(
         package="pyrobosim_ros",

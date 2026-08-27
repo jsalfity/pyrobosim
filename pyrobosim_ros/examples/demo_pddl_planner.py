@@ -6,6 +6,7 @@ Example showing how to use a PDDLStream planner as a ROS 2 node.
 
 import os
 import time
+
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -180,7 +181,7 @@ def main() -> None:
     rclpy.spin(planner_node)
 
     planner_node.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

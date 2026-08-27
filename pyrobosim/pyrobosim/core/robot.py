@@ -7,7 +7,6 @@ from typing import Any, Sequence
 
 import numpy as np
 import shapely
-from matplotlib.text import Text
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
@@ -25,12 +24,14 @@ from ..planning.actions import (
     TaskAction,
     TaskPlan,
 )
+from ..sensors.fov import FOVSensor
 from ..sensors.types import Sensor
 from ..utils.logging import create_logger
 from ..utils.polygon import sample_from_polygon, transform_polygon
 from ..utils.path import Path
 from ..utils.pose import Pose
 from ..utils.general import parse_color
+from ..utils.search_graph import SearchGraph
 from ..utils.world_collision import check_occupancy
 
 
@@ -126,7 +127,6 @@ class Robot(Entity):
         self.partial_obs_objects = partial_obs_objects
         self.known_objects: set[Object] = set()
         self.last_detected_objects: list[Object] = []
-        self.viz_text: Text | None = None
         self.partial_obs_hallways = partial_obs_hallways
         self.recorded_closed_hallways: set[Hallway] = set()
 
@@ -142,6 +142,8 @@ class Robot(Entity):
         # Navigation properties
         self.executing_nav = False
         self.last_nav_result = ExecutionResult()
+        self.displayed_path: Path | None = None
+        self.displayed_graphs: list[SearchGraph] = []
         self.set_path_planner(path_planner)
         self.set_path_executor(path_executor)
 
@@ -326,15 +328,37 @@ class Robot(Entity):
         set_parent(obj, self)
         obj.set_pose(self.get_pose())
 
+    def _update_displayed_path(
+        self, path: Path | None, show_graphs: bool = True
+    ) -> None:
+        """
+        Records the path and a snapshot of the planner graphs for UIs to display.
+
+        The graphs are snapshotted (rather than read live at render time)
+        because some planners mutate their state continuously while replanning.
+
+        :param path: The path to display, if any.
+        :param show_graphs: If True, snapshots the planner's current graphs;
+            otherwise clears them.
+        """
+        self.displayed_path = path
+        self.displayed_graphs = (
+            list(self.path_planner.get_graphs())
+            if (show_graphs and self.path_planner is not None)
+            else []
+        )
+        if self.world is not None:
+            self.world.mark_changed()
+
     def plan_path(
-        self, start: Pose | None = None, goal: Pose | str | None = None
+        self, start: Pose | None = None, goal: Pose | Entity | str | None = None
     ) -> Path | None:
         """
         Plans a path to a goal position.
 
         :param start: Start pose for the robot.
             If not specified, will default to the robot pose.
-        :param goal: Goal pose or entity name for the robot.
+        :param goal: Goal pose, entity, or entity name for the robot.
             If not specified, returns None.
         :return: The path, if one was found, otherwise None.
         """
@@ -355,24 +379,26 @@ class Robot(Entity):
         if not isinstance(goal, Pose):
             if self.world is None:
                 self.logger.warning(
-                    "Cannot specify a string goal if there is no world set."
+                    "Cannot resolve a non-pose goal if there is no world set."
                 )
                 return None
 
+            entity: Entity | str = goal
             if isinstance(goal, str):
                 query_list = [elem for elem in goal.split(" ") if elem]
-                entity = query_to_entity(
+                resolved_entity = query_to_entity(
                     self.world,
                     query_list,
                     mode="location",
                     robot=self,
                     resolution_strategy="nearest",
                 )
-                if entity is None:
+                if resolved_entity is None:
                     self.logger.warning(
                         f"Could not resolve goal location query: {query_list}"
                     )
                     return None
+                entity = resolved_entity
 
             goal_node = graph_node_from_entity(self.world, entity, robot=self)
             if goal_node is None:
@@ -381,11 +407,7 @@ class Robot(Entity):
             goal = goal_node.pose
 
         path = self.path_planner.plan(start, goal)
-        if (self.world is not None) and (self.world.gui is not None):
-            show_graphs = True
-            self.world.gui.canvas.show_planner_and_path_signal.emit(
-                self, show_graphs, path
-            )
+        self._update_displayed_path(path)
         return path
 
     def follow_path(
@@ -455,15 +477,13 @@ class Robot(Entity):
                 self.logger.info(f"Battery charged at {self.location.name}!")
                 self.battery_level = 100.0
 
-            if self.world.gui is not None:
-                self.world.gui.canvas.show_world_state(robot=self)
-                self.world.gui.update_buttons_signal.emit()
+            self.world.mark_changed()
         return result
 
     def navigate(
         self,
         start: Pose | None = None,
-        goal: Pose | str | None = None,
+        goal: Pose | Entity | str | None = None,
         path: Path | None = None,
         realtime_factor: float = 1.0,
     ) -> ExecutionResult:
@@ -472,7 +492,7 @@ class Robot(Entity):
 
         :param start: Start pose for the robot.
             If not specified, will default to the robot pose.
-        :param goal: Goal pose or entity name for the robot.
+        :param goal: Goal pose, entity, or entity name for the robot.
             If not specified, returns None.
         :param path: The path to follow.
         :param realtime_factor: A multiplier on the execution time relative to
@@ -499,11 +519,8 @@ class Robot(Entity):
                 )
                 self.executing_nav = False
                 return self.last_nav_result
-        elif (self.world is not None) and (self.world.gui is not None):
-            show_graphs = False
-            self.world.gui.canvas.show_planner_and_path_signal.emit(
-                self, show_graphs, path
-            )
+        else:
+            self._update_displayed_path(path, show_graphs=False)
 
         # Simulate execution options.
         exec_options = self.action_execution_options.get("navigate")
@@ -532,12 +549,7 @@ class Robot(Entity):
             return
 
         self.path_planner.reset()
-        if (self.world is not None) and (self.world.gui is not None):
-            show_graphs = True
-            path = None
-            self.world.gui.canvas.show_planner_and_path_signal.emit(
-                self, show_graphs, path
-            )
+        self._update_displayed_path(None)
 
     def pick_object(
         self, obj_query: str | None, grasp_pose: Pose | None = None
@@ -663,10 +675,7 @@ class Robot(Entity):
 
         # Denote the target object as the manipulated object
         self._attach_object(obj)
-        if self.world.gui is not None:
-            self.world.gui.canvas.update_object_plot(self.manipulated_object)
-            self.world.gui.canvas.show_world_state(self)
-            self.world.gui.update_buttons_signal.emit()
+        self.world.mark_changed()
         return ExecutionResult(status=ExecutionStatus.SUCCESS)
 
     def place_object(self, pose: Pose | None = None) -> ExecutionResult:
@@ -764,31 +773,22 @@ class Robot(Entity):
                     status=ExecutionStatus.EXECUTION_FAILURE, message=message
                 )
 
-        obj = self.manipulated_object
-        if (self.world is not None) and (self.world.gui is not None):
-            gui_patches = self.world.gui.canvas.obj_patches
-            if (obj.viz_patch is not None) and (obj.viz_patch in gui_patches):
-                gui_patches.remove(obj.viz_patch)
-                obj.viz_patch.remove()
-
         assert pose is not None
         set_parent(self.manipulated_object, loc)
         self.manipulated_object.set_pose(pose)
         self.manipulated_object.create_polygons()
-
-        if (self.world is not None) and (self.world.gui is not None):
-            self.world.gui.canvas.axes.add_patch(obj.viz_patch)
-            self.world.gui.canvas.obj_patches.append(obj.viz_patch)
-            self.world.gui.canvas.update_object_plot(obj)
-            self.world.gui.canvas.show_world_state(self)
-            self.world.gui.update_buttons_signal.emit()
-
         self.manipulated_object = None
+        if self.world is not None:
+            self.world.mark_changed()
         return ExecutionResult(status=ExecutionStatus.SUCCESS)
 
     def detect_objects(self, target_object: str | None = None) -> ExecutionResult:
         """
         Detects all objects at the robot's current location.
+
+        If the robot has any field-of-view (FOV) sensors, objects are instead
+        detected inside those sensors' fields of view, regardless of the
+        robot's location.
 
         :param target_object: The name of a target object or category.
             If None, the action succeeds regardless of which object is found.
@@ -797,22 +797,24 @@ class Robot(Entity):
         """
         self.last_detected_objects = []
 
-        if (self.location is None) or (not self.at_object_spawn()):
-            message = "Robot is not at an object spawn. Cannot detect objects."
-            self.logger.warning(message)
-            return ExecutionResult(
-                status=ExecutionStatus.PRECONDITION_FAILURE, message=message
-            )
-        if (
-            (self.location is not None)
-            and (self.location.parent is not None)
-            and (not self.location.is_open)
-        ):
-            message = f"{self.location.parent.name} is not open. Cannot detect objects."
-            self.logger.warning(message)
-            return ExecutionResult(
-                status=ExecutionStatus.PRECONDITION_FAILURE, message=message
-            )
+        fov_sensors = [
+            sensor for sensor in self.sensors.values() if isinstance(sensor, FOVSensor)
+        ]
+        if len(fov_sensors) == 0:
+            if (self.location is None) or (not self.at_object_spawn()):
+                message = "Robot is not at an object spawn. Cannot detect objects."
+                self.logger.warning(message)
+                return ExecutionResult(
+                    status=ExecutionStatus.PRECONDITION_FAILURE, message=message
+                )
+            if (self.location.parent is not None) and (not self.location.is_open):
+                message = (
+                    f"{self.location.parent.name} is not open. Cannot detect objects."
+                )
+                self.logger.warning(message)
+                return ExecutionResult(
+                    status=ExecutionStatus.PRECONDITION_FAILURE, message=message
+                )
 
         if self.battery_level <= 0.0:
             message = "Out of battery. Cannot detect objects."
@@ -834,27 +836,33 @@ class Robot(Entity):
                     status=ExecutionStatus.EXECUTION_FAILURE, message=message
                 )
 
-        # Add all the objects at the current robot's location.
-        for obj in self.location.children:
-            assert isinstance(obj, Object)
-            self.known_objects.add(obj)
+        # Gather the detected objects, either from the FOV sensors or from the
+        # robot's current location.
+        if len(fov_sensors) > 0:
+            visible_objects = set()
+            for sensor in fov_sensors:
+                sensor.update()
+                visible_objects.update(sensor.get_measurement())
+            detected_objects = sorted(visible_objects, key=lambda obj: obj.name)
+        else:
+            assert self.location is not None
+            detected_objects = [
+                obj for obj in self.location.children if isinstance(obj, Object)
+            ]
+        self.known_objects.update(detected_objects)
+        if self.world is not None:
+            self.world.mark_changed()
 
         # If a target object was specified, look for a matching instance.
         # We should only return SUCCESS if one such instance was found.
-        if (self.world is not None) and (self.world.gui is not None):
-            self.world.gui.canvas.show_objects()
-            self.world.gui.update_buttons_signal.emit()
         if not target_object:  # Checking for empty string and None
-            self.last_detected_objects = [
-                obj for obj in self.location.children if isinstance(obj, Object)
-            ]
+            self.last_detected_objects = detected_objects
             return ExecutionResult(status=ExecutionStatus.SUCCESS)
         else:
             self.last_detected_objects = [
                 obj
-                for obj in self.location.children
-                if isinstance(obj, Object)
-                and ((obj.name == target_object) or (obj.category == target_object))
+                for obj in detected_objects
+                if (obj.name == target_object) or (obj.category == target_object)
             ]
             if len(self.last_detected_objects) > 0:
                 return ExecutionResult(status=ExecutionStatus.SUCCESS)
@@ -1014,36 +1022,15 @@ class Robot(Entity):
         """
         self.executing_action = True
         self.current_action = action
-        if (self.world is not None) and (self.world.gui is not None):
-            self.world.gui.set_buttons_during_action(False)
 
         if action.type == "navigate":
             self.executing_nav = True
             path = action.path if action.path.num_poses > 0 else None
-            if (self.world is not None) and (self.world.gui is not None):
-                if action.target_location and not isinstance(
-                    action.target_location, str
-                ):
-                    target_location_name = action.target_location.name
-                else:
-                    target_location_name = action.target_location
-
-                self.world.gui.canvas.navigate_signal.emit(
-                    self,
-                    target_location_name,
-                    path,
-                    realtime_factor,
-                )
-                while self.executing_nav:
-                    time.sleep(0.25)  # Delay to wait for navigation
-                result = self.last_nav_result
-                self.world.gui.update_buttons_signal.emit()
-            else:
-                result = self.navigate(
-                    goal=action.target_location,
-                    path=path,
-                    realtime_factor=realtime_factor,
-                )
+            result = self.navigate(
+                goal=action.target_location,
+                path=path,
+                realtime_factor=realtime_factor,
+            )
 
         elif action.type == "pick":
             result = self.pick_object(action.object, action.pose)
@@ -1124,9 +1111,6 @@ class Robot(Entity):
         self.current_plan = plan
 
         self.logger.info("Executing task plan...")
-        if (self.world is not None) and (self.world.gui is not None):
-            self.world.gui.set_buttons_during_action(False)
-
         result = ExecutionResult(status=ExecutionStatus.SUCCESS)
         num_completed = 0
         num_acts = len(plan.actions)

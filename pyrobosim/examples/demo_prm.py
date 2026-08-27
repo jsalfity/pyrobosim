@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 from pyrobosim.core import WorldYamlLoader
-from pyrobosim.gui import start_gui
 from pyrobosim.navigation.prm import PRMPlanner
 from pyrobosim.utils.general import get_data_folder
 from pyrobosim.utils.pose import Pose
+from pyrobosim.web import start_ui
 
 # Load a test world.
 world_file = get_data_folder() / "test_world.yaml"
@@ -33,4 +33,4 @@ def test_prm() -> None:
 
 if __name__ == "__main__":
     test_prm()
-    start_gui(world)
+    start_ui(world)

@@ -22,7 +22,7 @@ copyright = "2022-2026, Sebastian Castro"
 author = "Sebastian Castro"
 
 # The full version, including alpha/beta/rc tags
-version = release = "4.3.4"
+version = release = "5.0.0"
 
 
 # -- General configuration ---------------------------------------------------
@@ -55,7 +55,6 @@ autodoc_mock_imports = [
     "rclpy",
     "std_srvs",
 ]
-
 
 # -- Options for HTML output -------------------------------------------------
 

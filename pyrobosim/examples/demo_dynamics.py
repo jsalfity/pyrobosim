@@ -9,9 +9,9 @@ import time
 from threading import Thread
 
 from pyrobosim.core import Robot, World
-from pyrobosim.gui import start_gui
 from pyrobosim.utils.general import get_data_folder
 from pyrobosim.utils.pose import Pose
+from pyrobosim.web import start_ui
 
 data_folder = get_data_folder()
 
@@ -124,5 +124,4 @@ if __name__ == "__main__":
     robot_commands_thread = Thread(target=lambda: command_robots(world))
     robot_commands_thread.start()
 
-    # Start the program either as ROS node or standalone.
-    start_gui(world)
+    start_ui(world)

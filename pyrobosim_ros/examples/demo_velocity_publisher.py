@@ -4,9 +4,10 @@
 Example showing how to publish velocity commands to a PyRoboSim robot.
 """
 
+import time
+
 import rclpy
 from rclpy.node import Node
-import time
 
 from geometry_msgs.msg import Twist
 
@@ -53,7 +54,7 @@ def main() -> None:
     pub_node = VelocityPublisher()
     rclpy.spin(pub_node)
     pub_node.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

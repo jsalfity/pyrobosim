@@ -4,9 +4,10 @@
 Example showing how to publish a goal specification to a PDDLStream planner node.
 """
 
+import time
+
 import rclpy
 from rclpy.node import Node
-import time
 
 from pyrobosim_msgs.msg import GoalPredicate, GoalSpecification  # type: ignore
 from pyrobosim_msgs.srv import SetLocationState  # type: ignore
@@ -96,7 +97,7 @@ def main() -> None:
 
     rclpy.spin(goal_node)
     goal_node.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

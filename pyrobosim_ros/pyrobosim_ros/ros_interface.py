@@ -12,7 +12,7 @@ import rclpy
 from rclpy.action import ActionServer, CancelResponse
 from rclpy.action.server import ServerGoalHandle
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import Executor, MultiThreadedExecutor
+from rclpy.executors import Executor, ExternalShutdownException, MultiThreadedExecutor
 from rclpy.logging import get_logger
 from rclpy.node import Node
 from rclpy.service import Service
@@ -103,6 +103,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         super().__init__(self.name)
 
         # Set world, if one is specified.
+        self.world: World | None = None
         if world:
             self.set_world(world)
 
@@ -209,11 +210,10 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         self.world.logger = get_logger(self.world.name)
         self.world.logger.info("Configured ROS node.")
 
-    def start(self, wait_for_gui: bool = False, auto_spin: bool = True) -> None:
+    def start(self, auto_spin: bool = True) -> None:
         """
         Starts the node.
 
-        :param wait_for_gui: If True, waits for the GUI to come up before starting.
         :param auto_spin: If True, creates an executor and spins it indefinitely.
             If you want to handle your own node execution, set this to False.
         """
@@ -222,8 +222,9 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
             executor.add_node(self)
             self.executor = executor
 
-        if not self.world:
+        if self.world is None:
             self.get_logger().error("Must set a world before starting node.")
+            return
 
         # Create robot specific interfaces
         for robot in self.world.robots:
@@ -234,26 +235,29 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
             self.dynamics_rate, self.dynamics_callback
         )
 
-        while wait_for_gui and not self.world.gui is not None:
-            self.get_logger().info("Waiting for GUI...")
-            time.sleep(1.0)
         self.get_logger().info("PyRoboSim ROS node ready!")
 
         if auto_spin:
             try:
                 executor.spin()
+            except (KeyboardInterrupt, ExternalShutdownException):
+                pass
+            except Exception:
+                if rclpy.ok():
+                    raise
             finally:
                 self.shutdown()
 
     def shutdown(self) -> None:
         """Shuts down cleanly."""
+        if self.world is not None:
+            self.world.shutdown()
         if self.executor:
             self.executor.remove_node(self)
             self.destroy_node()
             self.executor.shutdown()
             self.executor = None
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.try_shutdown()
 
     def add_robot_ros_interfaces(self, robot: Robot) -> None:
         """
@@ -391,6 +395,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         """
         Updates the dynamics of all spawned robots based on the latest received velocity commands.
         """
+        assert self.world is not None
         cur_time = self.get_clock().now()
 
         for robot in self.world.robots:
@@ -439,6 +444,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param goal_handle: Task action goal handle to process.
         :return: The action execution action result.
         """
+        assert self.world is not None
         robot = self.world.get_robot_by_name(goal_handle.request.action.robot)
         if not robot:
             message = f"Invalid robot name: {goal_handle.request.action.robot}"
@@ -471,10 +477,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         )
 
         # Package up the result
-        if goal_handle.is_cancel_requested:
-            goal_handle.canceled()
-        else:
-            goal_handle.succeed()
+        finalize_goal_handle(goal_handle)
         return ExecuteTaskAction.Result(
             execution_result=execution_result_to_ros(execution_result)
         )
@@ -486,6 +489,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param goal_handle: Task action goal handle to cancel.
         :return: The goal handle cancellation response.
         """
+        assert self.world is not None
         robot = self.world.get_robot_by_name(goal_handle.request.action.robot)
         if robot is not None:
             if not robot.is_busy():
@@ -507,6 +511,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param goal_handle: Task plan action goal handle to process.
         :return: The plan execution action result.
         """
+        assert self.world is not None
         plan_msg = goal_handle.request.plan
         robot = self.world.get_robot_by_name(plan_msg.robot)
         if not robot:
@@ -545,10 +550,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         )
 
         # Package up the result
-        if goal_handle.is_cancel_requested:
-            goal_handle.canceled()
-        else:
-            goal_handle.succeed()
+        finalize_goal_handle(goal_handle)
         return ExecuteTaskPlan.Result(
             execution_result=execution_result_to_ros(execution_result),
             num_completed=num_completed,
@@ -562,6 +564,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param goal_handle: Task plan goal handle to cancel.
         :return: The goal handle cancellation response.
         """
+        assert self.world is not None
         robot = self.world.get_robot_by_name(goal_handle.request.plan.robot)
         if robot is not None:
             if not robot.is_busy():
@@ -611,12 +614,11 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :return: The path following action result.
         """
 
+        assert self.world is not None
+
         # Follow path in a separate thread so we can check for cancellation in parallel.
         path = path_from_ros(goal_handle.request.path)
         Thread(target=robot.follow_path, args=(path,)).start()
-
-        if self.world.gui is not None:
-            self.world.gui.set_buttons_during_action(False)
 
         while robot.executing_nav and goal_handle.status != GoalStatus.STATUS_CANCELED:
             if goal_handle.is_cancel_requested:
@@ -625,15 +627,12 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
                 break
             time.sleep(0.1)
 
-        if self.world.gui is not None:
-            self.world.gui.set_buttons_during_action(True)
-
         if goal_handle.status == GoalStatus.STATUS_CANCELED:
             return FollowPath.Result(
                 execution_result=ExecutionResult(status=ExecutionResult.CANCELED),
                 message="Path following canceled.",
             )
-        goal_handle.succeed()
+        finalize_goal_handle(goal_handle)
         return FollowPath.Result(
             execution_result=execution_result_to_ros(robot.last_nav_result)
         )
@@ -740,6 +739,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param response: The unmodified service response.
         :return: The modified service response containing the world information.
         """
+        assert self.world is not None
         self.get_logger().info("Received world information request")
 
         response.info.name = self.world.name
@@ -761,6 +761,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param response: The unmodified service response.
         :return: The modified service response containing the world state.
         """
+        assert self.world is not None
         self.get_logger().info("Received world state request.")
 
         # Determine whether to use a robot's local observations or the full world state.
@@ -822,6 +823,7 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param response: The unmodified service response.
         :return: The modified service response containing result of setting the location state.
         """
+        assert self.world is not None
         self.get_logger().info("Received location state setting request.")
 
         # Check if the entity exists.
@@ -876,19 +878,31 @@ class WorldROSWrapper(Node):  # type: ignore[misc]
         :param response: The service response indicating success or failure.
         :return: The modified service response containing the result of the reset operation.
         """
-        # Wait to cancel all the robot actions.
-        cancel_threads = [
-            Thread(target=robot.cancel_actions) for robot in self.world.robots
-        ]
-        for thread in cancel_threads:
-            thread.start()
-        for thread in cancel_threads:
-            thread.join()
+        assert self.world is not None
+        self.world.shutdown()
 
         response.success = self.world.reset(
             deterministic=request.deterministic, seed=request.seed
         )
         return response
+
+
+def finalize_goal_handle(goal_handle: ServerGoalHandle) -> None:  # type: ignore[type-arg] # Cannot add type args in Humble and Jazzy
+    """
+    Marks a goal handle canceled or succeeded once its execution completes.
+
+    :param goal_handle: The goal handle to finalize.
+    """
+    try:
+        if goal_handle.is_cancel_requested:
+            goal_handle.canceled()
+        else:
+            goal_handle.succeed()
+    except Exception:
+        #  Failures are ignored if the ROS context was already shut down
+        # (e.g., on Ctrl+C), since the goal can no longer be finalized.
+        if rclpy.ok():
+            raise
 
 
 def update_world_from_state_msg(world: World, msg: WorldState) -> None:

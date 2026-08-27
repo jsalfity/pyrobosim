@@ -18,7 +18,9 @@ Then, run the example.
 
     python3 examples/demo.py
 
-You can now interact with the GUI through the buttons and text boxes.
+This serves the UI at ``http://localhost:8050`` and opens it in your default browser.
+
+You can now interact with the UI through the buttons and text boxes.
 For example, enter "bedroom desk" in the **Goal query** text box and then click the **Navigate** button.
 Once at the destination, click **Pick**.
 
@@ -41,7 +43,7 @@ First, build and setup your ROS 2 workspace (or use one of our provided Docker c
     . install/local_setup.bash
 
 
-You can run a ROS 2 enabled demo and interact with the GUI:
+You can run a ROS 2 enabled demo and interact with the UI:
 
 ::
 
@@ -91,6 +93,23 @@ For example:
 
 Refer to the :ref:`yaml_schemas` documentation for more information.
 
+Web UI
+------
+
+The PyRoboSim UI is browser-based and built with `Plotly Dash <https://dash.plotly.com/>`_.
+The examples serve it at ``http://localhost:8050`` and open it in your default browser.
+
+To use the web UI in your own scripts, call ``start_ui`` with a world:
+
+.. code-block:: python
+
+    from pyrobosim.web import start_ui
+
+    start_ui(world, host="127.0.0.1", port=8050, auto_open=True)
+
+To keep the browser from opening automatically (e.g., on a headless machine), pass ``auto_open=False``.
+
+Note that the web server is unauthenticated, so only bind to a non-localhost address (``host``) on networks you trust.
 
 Exporting Worlds to Gazebo
 --------------------------
@@ -112,20 +131,5 @@ Then, follow the steps displayed on the console to see the generated world.
     :align: center
     :width: 600px
     :alt: Example world exported to Gazebo.
-
-If you add the ``--classic`` flag to this demo, you can similarly export to Gazebo Classic.
-
-::
-
-    # Standalone
-    python3 examples/demo_world_save.py --classic
-
-    # ROS 2
-    ros2 run pyrobosim_ros demo_world_save.py --classic
-
-.. image:: ../media/gazebo_classic_demo_world.png
-    :align: center
-    :width: 600px
-    :alt: Example world exported to Gazebo Classic.
 
 |

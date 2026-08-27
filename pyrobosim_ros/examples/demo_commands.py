@@ -4,11 +4,13 @@
 Example showing how to request task actions and plans.
 """
 
+import time
+
 import rclpy
 from rclpy.action import ActionClient
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.task import Future
-import time
 
 from pyrobosim_msgs.action import ExecuteTaskAction, ExecuteTaskPlan  # type: ignore
 from pyrobosim_msgs.msg import TaskAction, TaskPlan  # type: ignore
@@ -159,8 +161,11 @@ def main() -> None:
 
     rclpy.spin(cmd)
     cmd.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass

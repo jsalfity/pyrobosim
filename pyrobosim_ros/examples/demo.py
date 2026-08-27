@@ -6,15 +6,16 @@ additionally starting up a ROS interface.
 """
 
 import os
-import rclpy
 import threading
 
+import rclpy
+
 from pyrobosim.core import Robot, World, WorldYamlLoader
-from pyrobosim.gui import start_gui
 from pyrobosim.navigation.execution import ConstantVelocityExecutor
 from pyrobosim.navigation.rrt import RRTPlanner
 from pyrobosim.utils.general import get_data_folder
 from pyrobosim.utils.pose import Pose
+from pyrobosim.web import start_ui
 from pyrobosim_ros.ros_interface import WorldROSWrapper
 
 data_folder = get_data_folder()
@@ -162,8 +163,8 @@ if __name__ == "__main__":
     node = create_ros_node()
 
     # Start ROS node in separate thread
-    ros_thread = threading.Thread(target=lambda: node.start(wait_for_gui=True))
+    ros_thread = threading.Thread(target=node.start)
     ros_thread.start()
 
-    # Start GUI in main thread
-    start_gui(node.world)
+    # Start the web UI in main thread
+    start_ui(node.world)

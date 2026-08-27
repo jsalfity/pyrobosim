@@ -13,27 +13,23 @@
 
 services:
   base:
-    image: pyrobosim_ros:${ROS_DISTRO:-humble}
+    image: pyrobosim_ros:${ROS_DISTRO:-jazzy}
     build:
       context: .
       dockerfile: docker/Dockerfile
       target: pyrobosim_ros
       args:
-        ROS_DISTRO: ${ROS_DISTRO:-humble}
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
     # Ensures signals are actually passed and reaped in the container for shutdowns.
     # https://docs.docker.com/compose/compose-file/compose-file-v3/#init
     init: true
     # Interactive shell
     stdin_open: true
     tty: true
-    # Networking and IPC for ROS 2
+    # Networking and IPC for ROS 2.
+    # This also makes the web UI reachable on the host.
     network_mode: host
     ipc: host
-    # Allows graphical programs in the container.
-    environment:
-      - DISPLAY=${DISPLAY}
-      - QT_X11_NO_MITSHM=1
-      - NVIDIA_DRIVER_CAPABILITIES=all
     volumes:
       # Mount the source code.
       - ./pyrobosim/:/pyrobosim_ws/src/pyrobosim/:rw
@@ -43,9 +39,6 @@ services:
       - ./docs/:/pyrobosim_ws/src/docs/:rw
       - ./test/:/pyrobosim_ws/src/test/:rw
       - ./pytest.ini:/pyrobosim_ws/pytest.ini:rw
-      # Allows graphical programs in the container.
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority
     command: sleep infinity
 
   docs:
@@ -53,7 +46,7 @@ services:
     command: src/docs/generate_docs.bash
   test:
     extends: base
-    command: src/test/run_tests.bash ${ROS_DISTRO:-humble}
+    command: src/test/run_tests.bash ${ROS_DISTRO:-jazzy}
 
   ###############
   # Basic demos #

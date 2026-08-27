@@ -19,6 +19,8 @@ def generate_launch_description() -> LaunchDescription:
         executable="demo.py",
         name="demo",
         parameters=[{"world_file": LaunchConfiguration("world_file")}],
+        output="screen",
+        emulate_tty=True,
     )
 
     return LaunchDescription([world_file_arg, demo_node])

@@ -1,10 +1,8 @@
 """Lidar sensor simulation."""
 
 import time
-from typing import Any
+from typing import Any, Iterable
 
-from matplotlib.artist import Artist
-from matplotlib.collections import LineCollection
 import numpy as np
 from shapely import get_parts, intersects, intersection_all
 from shapely.geometry import LineString, MultiLineString
@@ -127,29 +125,13 @@ class Lidar2D(Sensor):
 
         return np.array([line.length for line in self.lidar_lines])
 
-    def setup_artists(self) -> list[Artist]:
+    def get_display_coords(self) -> Iterable[Iterable[tuple[float, float]]]:
         """
-        Sets up and returns the artists for visualizing the sensor.
+        Returns the coordinates of the lidar rays to currently display.
 
-        :return: The list of MatPlotLib artists for the sensor.
+        :return: The list of lidar ray segments, each a sequence of (x, y) points.
         """
-        self.artist = LineCollection(
-            self.lidar_coords,
-            color=self.robot.color if (self.robot is not None) else "b",
-            alpha=0.5,
-            linewidth=0.5,
-            linestyle="-",
-            zorder=0,
-        )
-        return [self.artist]
-
-    def update_artists(self) -> None:
-        """
-        Updates the artists.
-
-        These should have been originally returned by `setup_artists()`.
-        """
-        self.artist.set_paths(self.lidar_coords)
+        return self.lidar_coords if self.is_active else []
 
     def to_dict(self) -> dict[str, Any]:
         """

@@ -2,6 +2,8 @@
 
 # Set up PDDLStream
 
+set -euo pipefail
+
 # Set up the dependencies folder
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 DEPENDS_DIR=${SCRIPT_DIR}/../dependencies
@@ -12,7 +14,7 @@ fi
 
 # Clone and build PDDLStream
 pushd ${SCRIPT_DIR}/../dependencies > /dev/null || exit
-git clone https://github.com/caelan/pddlstream.git
+git clone -b bump-downward https://github.com/sea-bass/pddlstream.git
 pushd pddlstream > /dev/null || exit
 touch COLCON_IGNORE
 git submodule update --init --recursive

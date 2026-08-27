@@ -11,7 +11,6 @@ import argparse
 
 from pyrobosim.core.robot import Robot
 from pyrobosim.core.world import World
-from pyrobosim.gui import start_gui
 from pyrobosim.navigation.execution import ConstantVelocityExecutor
 from pyrobosim.navigation.a_star import AStarPlanner
 from pyrobosim.navigation.prm import PRMPlanner
@@ -19,6 +18,7 @@ from pyrobosim.navigation.rrt import RRTPlanner
 from pyrobosim.sensors.lidar import Lidar2D
 from pyrobosim.utils.general import get_data_folder
 from pyrobosim.utils.pose import Pose
+from pyrobosim.web import start_ui
 
 data_folder = get_data_folder()
 
@@ -223,5 +223,5 @@ if __name__ == "__main__":
     # Create a world.
     world = create_world(args.multirobot)
 
-    # Start the GUI.
-    start_gui(world)
+    # Start the web UI.
+    start_ui(world)

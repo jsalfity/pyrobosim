@@ -59,6 +59,8 @@ def generate_launch_description() -> LaunchDescription:
         package="pyrobosim_ros",
         executable="demo_pddl_world.py",
         name="pddl_demo",
+        output="screen",
+        emulate_tty=True,
     )
     planner_node = OpaqueFunction(function=launch_planner_node)
     goalspec_node = Node(
