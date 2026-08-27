@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from pyrobosim.core import WorldYamlLoader
-from pyrobosim.gui import start_gui
+from pyrobosim.web import start_ui
 from pyrobosim.behaviors import build_pyrobosim_tree_from_json
 
 
@@ -97,8 +97,8 @@ def main():
 
     threading.Thread(target=run_tree, daemon=True).start()
 
-    # Start GUI (blocking)
-    start_gui(world)
+    # Start web UI (blocking)
+    start_ui(world)
 
 
 if __name__ == "__main__":

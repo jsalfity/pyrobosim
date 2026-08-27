@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from pyrobosim.core import WorldYamlLoader
 from pyrobosim.behaviors.local_bt import build_pyrobosim_tree_from_json
-from pyrobosim.gui import start_gui
+from pyrobosim.web import start_ui
 import py_trees
 import py_trees.display
 
@@ -126,10 +126,10 @@ def main():
     bt_thread.start()
 
     # Start GUI visualization (this will block until GUI is closed)
-    print("\nStarting GUI visualization...")
+    print("\nStarting web UI visualization...")
     print("The robot will start moving in 2 seconds...")
-    print("Close the GUI window to exit.")
-    start_gui(world)
+    print("Stop the server (Ctrl+C) to exit.")
+    start_ui(world)
 
 
 if __name__ == "__main__":

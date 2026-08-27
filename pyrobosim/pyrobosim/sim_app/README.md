@@ -234,5 +234,5 @@ python run_eval.py \
 This module depends on:
 - `pyrobosim.behaviors.build_pyrobosim_tree_from_json` (from feature/json_bt_integration)
 - `pyrobosim.core.World`, `WorldYamlLoader`
-- `pyrobosim.gui.start_gui`
+- `pyrobosim.web.start_ui`
 - `py_trees` for BT execution

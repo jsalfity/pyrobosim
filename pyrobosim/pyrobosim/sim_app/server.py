@@ -29,7 +29,7 @@ from typing import Any
 import py_trees
 from pyrobosim.behaviors import build_pyrobosim_tree_from_json
 from pyrobosim.core import World, WorldYamlLoader
-from pyrobosim.gui import start_gui
+from pyrobosim.web import start_ui
 from pyrobosim.sim_app.world_entities import build_world_entities
 from pyrobosim.utils.general import get_data_folder
 
@@ -428,8 +428,8 @@ def main() -> None:
 
     start_control_server(context, args.host, args.port)
 
-    print("Starting GUI (this will block until GUI is closed)...")
-    start_gui(world)
+    print("Starting Web UI (this will block until the server is stopped)...")
+    start_ui(world)
 
 
 if __name__ == "__main__":
