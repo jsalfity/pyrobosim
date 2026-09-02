@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import py_trees
-from pyrobosim.behaviors import build_pyrobosim_tree_from_json
+from pyrobosim.behaviors import RobotActionBehavior, build_pyrobosim_tree_from_json
 from pyrobosim.core import World, WorldYamlLoader
 from pyrobosim.gui import start_gui
 from pyrobosim.sim_app.world_entities import build_world_entities
@@ -109,9 +109,36 @@ class SimContext:
         tick_ms: int,
         realtime_factor: float = 1.0,
         print_every: int = 1,
+        policy_mode: bool = False,
+        max_ticks: int = 0,
     ) -> str:
-        """Start a behavior tree execution in a background thread."""
+        """Start a behavior tree execution in a background thread.
+
+        Two termination regimes, because plan-shaped and policy-shaped BTs mean
+        different things by a SUCCESS at the root:
+
+        - Default (``policy_mode=False``): stop as soon as the root reports
+          SUCCESS or FAILURE. Correct for a plan, whose root succeeds only when
+          the last action of the task has completed.
+
+        - ``policy_mode=True``: a root SUCCESS means "the highest-priority
+          applicable rule ran this tick", which is progress, not completion, so
+          keep ticking. The tree ends itself: a backward-chaining planner puts
+          its goal condition as the first child of the root fallback, so once
+          the goal holds that child succeeds without any action running, and the
+          run stops. FAILURE still terminates immediately -- it means no rule is
+          applicable, which is a genuine policy failure. ``max_ticks`` bounds
+          livelock, where a policy oscillates between rules without progress
+          (e.g. navigate/detect when the world does not match the action model).
+        """
         robot = self.get_robot(robot_name)
+        # The blackboard is process-global and is not otherwise reset, so
+        # without this a run inherits keys written by whichever BT ran before
+        # it. Detection results are the dangerous case: a stale
+        # "<loc>_detections" entry can satisfy a condition in the next tree and
+        # let it skip the detect that should have produced it. Clear before
+        # building, so the tree's own `blackboard.initial` seeding still wins.
+        py_trees.blackboard.Blackboard.clear()
         tree = build_pyrobosim_tree_from_json(bt_json, robot=robot, realtime_factor=realtime_factor)
         cancel_event = threading.Event()
         run_id = str(uuid.uuid4())
@@ -130,15 +157,33 @@ class SimContext:
                     if tree_text:
                         self.bt_runs[run_id]["tree"] = tree_text
 
+        def _goal_condition_satisfied() -> bool:
+            """True if the root fallback succeeded via a pure condition.
+
+            A backward-chaining planner places its goal check as the first child
+            of the root fallback, so the run is complete exactly when the root
+            reports SUCCESS and the child responsible is a condition rather than
+            an action. Checking the responsible child (rather than scanning all
+            action statuses) avoids being misled by an action that succeeded on
+            an earlier tick and still carries a SUCCESS status.
+            """
+            for child in tree.root.children:
+                if child.status != py_trees.common.Status.SUCCESS:
+                    continue
+                # The first successful child is the one the fallback returned
+                # on. It completes the run only if no action ran underneath it.
+                return not any(
+                    isinstance(node, RobotActionBehavior) for node in child.iterate()
+                )
+            return False
+
         def _runner() -> None:
             import time
             tick_period_s = tick_ms / 1000.0
             count = 0
+            timed_out = False
 
-            while tree.root.status not in (
-                py_trees.common.Status.SUCCESS,
-                py_trees.common.Status.FAILURE,
-            ):
+            while True:
                 if cancel_event.is_set():
                     with self.lock:
                         if run_id in self.bt_runs:
@@ -148,6 +193,21 @@ class SimContext:
                 tree.tick()
                 count += 1
                 _on_tick(count)
+
+                status = tree.root.status
+                if status == py_trees.common.Status.FAILURE:
+                    break
+                if status == py_trees.common.Status.SUCCESS:
+                    # A plan's root succeeds only when the task is complete. A
+                    # policy's root succeeds whenever any rule fires, so keep
+                    # ticking unless the success came from the goal condition
+                    # rather than from an action.
+                    if not policy_mode or _goal_condition_satisfied():
+                        break
+                if max_ticks and count >= max_ticks:
+                    timed_out = True
+                    break
+
                 time.sleep(tick_period_s)
 
             # Capture failure information
@@ -161,9 +221,17 @@ class SimContext:
 
             with self.lock:
                 if run_id in self.bt_runs:
-                    self.bt_runs[run_id]["status"] = tree.root.status.name
-                    if failed_node:
-                        self.bt_runs[run_id]["failed_node"] = failed_node
+                    if timed_out:
+                        # Exhausting the tick budget is not a tree status; it is
+                        # a livelock, where a policy keeps firing rules without
+                        # reaching its goal. Report it as such rather than
+                        # letting the last tick's SUCCESS look like completion.
+                        self.bt_runs[run_id]["status"] = "TIMEOUT"
+                        self.bt_runs[run_id]["failed_node"] = "tick_budget_exhausted"
+                    else:
+                        self.bt_runs[run_id]["status"] = tree.root.status.name
+                        if failed_node:
+                            self.bt_runs[run_id]["failed_node"] = failed_node
 
         with self.lock:
             self.bt_runs[run_id] = {
@@ -362,9 +430,19 @@ class ControlHandler(BaseHTTPRequestHandler):
         tick_ms = int(data.get("tick_ms", 100))
         realtime_factor = float(data.get("realtime_factor", 1.0))
         print_every = int(data.get("print_every", 1))
+        # Policy-shaped trees (e.g. from a backward-chaining planner) keep
+        # ticking past a root SUCCESS; see SimContext.start_bt.
+        policy_mode = bool(data.get("policy_mode", False))
+        max_ticks = int(data.get("max_ticks", 0))
         try:
             run_id = self.context.start_bt(
-                bt_json, robot, tick_ms, realtime_factor=realtime_factor, print_every=print_every
+                bt_json,
+                robot,
+                tick_ms,
+                realtime_factor=realtime_factor,
+                print_every=print_every,
+                policy_mode=policy_mode,
+                max_ticks=max_ticks,
             )
         except Exception as exc:
             self._send_json({"error": str(exc)}, status=400)

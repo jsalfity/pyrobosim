@@ -13,6 +13,13 @@ from pyrobosim.planning.actions import ExecutionResult, TaskAction
 from pyrobosim.utils.path import Path
 from pyrobosim.utils.pose import Pose
 
+#: Written to a `held_object` key when the gripper is empty. A blackboard key
+#: that was never written also reads back as None, so an empty gripper and an
+#: unwritten key would otherwise be indistinguishable to a condition node.
+#: An explicit sentinel lets a BT test "not holding anything" as
+#: {"key": ..., "operator": "==", "value": "__none__"}.
+NONE_SENTINEL = "__none__"
+
 
 class RobotActionBehavior(py_trees.behaviour.Behaviour):
     """Non-blocking wrapper around a PyRoboSim TaskAction."""
@@ -95,10 +102,69 @@ class RobotActionBehavior(py_trees.behaviour.Behaviour):
             elif value_name == "detected_objects":
                 detected = [obj.name for obj in self.robot.last_detected_objects]
                 self._bb_client.set(bb_key, detected)
+            elif value_name == "detected_categories":
+                # Instance names ("bread0") are what detected_objects reports,
+                # but task prompts and the world vocabulary speak in categories
+                # ("bread"). Publishing categories separately lets a BT test
+                # "did I see any bread?" without having to guess the instance
+                # suffix. detected_objects is left unchanged so existing trees
+                # keep working.
+                self._bb_client.set(
+                    bb_key,
+                    sorted({obj.category for obj in self.robot.last_detected_objects}),
+                )
             elif value_name == "battery_level":
                 self._bb_client.set(bb_key, self.robot.battery_level)
             elif value_name == "last_nav_result":
                 self._bb_client.set(bb_key, self.robot.last_nav_result)
+            elif value_name == "robot_location":
+                # Report the name an operator (and the world vocabulary) would
+                # use. robot.location resolves to the object spawn the robot is
+                # standing at -- "pantry_storage" -- whereas the vocabulary and
+                # every task prompt say "pantry". Publish the parent's name so
+                # a condition can be written against the vocabulary the
+                # contract exposes.
+                location = self.robot.location
+                parent = getattr(location, "parent", None)
+                name = getattr(parent, "name", None) or getattr(location, "name", None)
+                if name is None and location is not None:
+                    name = str(location)
+                self._bb_client.set(bb_key, name)
+            elif value_name == "held_object":
+                held = self.robot.manipulated_object
+                self._bb_client.set(bb_key, getattr(held, "name", None) or NONE_SENTINEL)
+            elif value_name == "objects_here":
+                # Categories of objects currently at the robot's location.
+                # Lets a BT check "is there a soda here?" after placing one,
+                # which is the observable counterpart of an On(obj,loc) fact.
+                location = self.robot.location
+                parent = getattr(location, "parent", None)
+                here = getattr(parent, "name", None) or getattr(location, "name", None)
+                cats = sorted(
+                    {
+                        obj.category
+                        for obj in getattr(self.robot.world, "objects", [])
+                        if _object_location_name(obj) == here
+                    }
+                )
+                self._bb_client.set(bb_key, cats)
+            elif value_name == "held_category":
+                # Category counterpart to held_object, for the same reason
+                # detected_categories exists: the world holds "bread0" while
+                # prompts and the vocabulary say "bread".
+                held = self.robot.manipulated_object
+                self._bb_client.set(bb_key, getattr(held, "category", None) or NONE_SENTINEL)
+
+
+def _object_location_name(obj: Any) -> str | None:
+    """Name of the location holding `obj`, at vocabulary granularity.
+
+    Objects sit in an ObjectSpawn ("pantry_storage"), whose parent is the
+    location the vocabulary names ("pantry").
+    """
+    spawn = getattr(obj, "parent", None)
+    parent = getattr(spawn, "parent", None)
+    return getattr(parent, "name", None) or getattr(spawn, "name", None)
 
 
 def _pose_from_dict(data: dict[str, Any]) -> Pose:

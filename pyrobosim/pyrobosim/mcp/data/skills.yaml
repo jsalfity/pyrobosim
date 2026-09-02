@@ -14,7 +14,7 @@ skills:
         type: path
         source: [literal, blackboard]
         required: false
-    outputs: [status, message, last_nav_result, battery_level]
+    outputs: [status, message, last_nav_result, battery_level, robot_location, held_object, held_category, objects_here]
 
   - name: pick
     description: Pick up an object at the current location. The robot must be at a location where the object is present. Use object names or categories from the world vocabulary. CONSTRAINT - Single-arm robot can only hold one object at a time; cannot pick while already holding something.
@@ -27,7 +27,7 @@ skills:
         type: pose
         source: [literal, blackboard]
         required: false
-    outputs: [status, message, battery_level]
+    outputs: [status, message, battery_level, robot_location, held_object, held_category, objects_here]
 
   - name: place
     description: Place the currently held object at the current location. The robot must be at a location where objects can be placed (navigate to a location first).
@@ -36,7 +36,7 @@ skills:
         type: pose
         source: [literal, blackboard]
         required: false
-    outputs: [status, message, battery_level]
+    outputs: [status, message, battery_level, robot_location, held_object, held_category, objects_here]
 
   - name: detect
     description: Detect objects at the current location. The robot must be at a location (navigate there first). If the location can be closed (e.g., pantry, fridge), it must be opened first using the open action. The object parameter can be a specific object name or category from the world vocabulary.
@@ -45,7 +45,7 @@ skills:
         type: string
         source: [literal, blackboard]
         required: false
-    outputs: [status, message, detected_objects, battery_level]
+    outputs: [status, message, detected_objects, detected_categories, battery_level, robot_location, held_object, held_category, objects_here]
 
   - name: open
     description: Open the current location or target location if provided. Certain locations like pantry and fridge must be opened before you can detect or pick objects inside them. CONSTRAINT - Cannot open while holding an object (single-arm robot).
@@ -54,7 +54,7 @@ skills:
         type: string
         source: [literal, blackboard]
         required: false
-    outputs: [status, message, battery_level]
+    outputs: [status, message, battery_level, robot_location, held_object, held_category, objects_here]
 
   - name: close
     description: Close the current location or target location if provided. CRITICAL CONSTRAINT - Cannot close while holding an object (single-arm robot). Only close locations when NOT holding anything. If you pick an object from a location, do NOT close it until after you place the object elsewhere.
@@ -63,4 +63,4 @@ skills:
         type: string
         source: [literal, blackboard]
         required: false
-    outputs: [status, message, battery_level]
+    outputs: [status, message, battery_level, robot_location, held_object, held_category, objects_here]

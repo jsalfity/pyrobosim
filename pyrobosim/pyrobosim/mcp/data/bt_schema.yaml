@@ -33,8 +33,20 @@ action_node:
       message: blackboard_key
       result: blackboard_key
       detected_objects: blackboard_key
+      detected_categories: blackboard_key
       battery_level: blackboard_key
       last_nav_result: blackboard_key
+      # World-state outputs. The keys above report what the action just did;
+      # these report the state of the world after it ran.
+      #   robot_location: name of the robot's current location, or null when
+      #     it is between locations.
+      #   held_object: name of the grasped object, or the string "__none__"
+      #     when the gripper is empty. A never-written key also reads as null,
+      #     so the sentinel is what makes "holding nothing" testable.
+      robot_location: blackboard_key
+      held_object: blackboard_key
+      held_category: blackboard_key
+      objects_here: blackboard_key
 
 condition_node:
   type: condition
