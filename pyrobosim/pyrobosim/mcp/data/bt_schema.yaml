@@ -47,6 +47,7 @@ action_node:
       held_object: blackboard_key
       held_category: blackboard_key
       objects_here: blackboard_key
+      open_locations: blackboard_key
 
 condition_node:
   type: condition

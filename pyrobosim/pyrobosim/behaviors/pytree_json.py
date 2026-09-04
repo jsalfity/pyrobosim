@@ -133,6 +133,16 @@ class RobotActionBehavior(py_trees.behaviour.Behaviour):
             elif value_name == "held_object":
                 held = self.robot.manipulated_object
                 self._bb_client.set(bb_key, getattr(held, "name", None) or NONE_SENTINEL)
+            elif value_name == "open_locations":
+                # Names of locations currently open. Container state is not
+                # otherwise observable, and a plan that must open a fridge
+                # before reaching into it needs to test whether it already did.
+                names = sorted(
+                    loc.name
+                    for loc in getattr(self.robot.world, "locations", [])
+                    if getattr(loc, "is_open", False)
+                )
+                self._bb_client.set(bb_key, names)
             elif value_name == "objects_here":
                 # Categories of objects currently at the robot's location.
                 # Lets a BT check "is there a soda here?" after placing one,
