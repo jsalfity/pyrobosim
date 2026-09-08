@@ -6,7 +6,12 @@ rootstocks:
       object_query: Object name or category to detect and pick.
       source_location: Location or object spawn to navigate to before detect and pick.
       open_before_detect: Set true when the source location can be closed, such as pantry or fridge.
-    anti_pattern: Do not pick before detect succeeds.
+    anti_pattern: >-
+      Do not pick before detect succeeds. Do not close a container while
+      holding an object: this robot is single-arm, so open and close both
+      require an empty gripper and fail at runtime otherwise, aborting the
+      task. Close only if the task asks for the container to end closed, and
+      then only after the object has been placed.
     template:
       root:
         type: sequence
@@ -42,7 +47,11 @@ rootstocks:
       fallback_location: Second search location.
       primary_open_before_detect: Set true when the primary location can be closed.
       fallback_open_before_detect: Set true when the fallback location can be closed.
-    anti_pattern: Do not make the fallback branch a blind navigate-and-pick sequence.
+    anti_pattern: >-
+      Do not make the fallback branch a blind navigate-and-pick sequence. Do
+      not close a container while holding an object: close requires an empty
+      gripper on this single-arm robot and fails at runtime. Close only if the
+      task asks for it, and then only after the object has been placed.
     template:
       root:
         type: selector
@@ -106,7 +115,12 @@ rootstocks:
       delivery_mode: One of place or return.
       primary_open_before_detect: Set true when the primary location can be closed.
       fallback_open_before_detect: Set true when the fallback location can be closed.
-    anti_pattern: Do not put delivery actions inside only one selector branch.
+    anti_pattern: >-
+      Do not put delivery actions inside only one selector branch. Do not open
+      or close any container while holding an object: both require an empty
+      gripper on this single-arm robot and fail at runtime. If the destination
+      is a container that must be opened, open it before picking the object.
+      Close only if the task asks for it, and then only after placing.
     template:
       root:
         type: sequence
@@ -173,3 +187,64 @@ rootstocks:
               slot_equals:
                 slot: delivery_mode
                 value: place
+
+  - name: retrieve_and_restore
+    description: Retrieve an object from a closeable container, deliver it, then restore the container to closed.
+    when_to_use: >-
+      Use when the task asks for the container to end closed -- "close the
+      fridge", "leave it as you found it", "put it back the way it was". If the
+      task does not ask for that, use detect_pick or search_pick_deliver and
+      leave the container open.
+    slots:
+      object_query: Object name or category to detect and pick.
+      source_location: Container holding the object, which must end closed.
+      destination_location: Where the object must end up.
+    anti_pattern: >-
+      Do not close the container immediately after picking. This robot is
+      single-arm: close requires an empty gripper, so closing while still
+      holding the object fails at runtime and aborts the task. The gripper is
+      free only after place, which is why the close comes last and needs a
+      navigate back to the container.
+    template:
+      root:
+        type: sequence
+        memory: true
+        children:
+          - type: action
+            name: navigate_to_source
+            action: navigate
+            params:
+              target_location: "{source_location}"
+          - type: action
+            name: open_source
+            action: open
+            params:
+              target_location: "{source_location}"
+          - type: action
+            name: detect_target
+            action: detect
+            params:
+              object: "{object_query}"
+          - type: action
+            name: pick_target
+            action: pick
+            params:
+              object: "{object_query}"
+          - type: action
+            name: navigate_to_destination
+            action: navigate
+            params:
+              target_location: "{destination_location}"
+          - type: action
+            name: place_target
+            action: place
+          - type: action
+            name: navigate_back_to_source
+            action: navigate
+            params:
+              target_location: "{source_location}"
+          - type: action
+            name: close_source
+            action: close
+            params:
+              target_location: "{source_location}"
