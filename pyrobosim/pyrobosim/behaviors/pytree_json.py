@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import threading
+import time
 from functools import partial
 from typing import Any
 
 import py_trees
 from py_trees.json_bt import build_tree_from_json, extract_blackboard_keys, resolve_param
 
-from pyrobosim.planning.actions import ExecutionResult, TaskAction
+from pyrobosim.planning.actions import ExecutionResult, ExecutionStatus, TaskAction
 from pyrobosim.utils.path import Path
 from pyrobosim.utils.pose import Pose
 
@@ -48,7 +49,17 @@ class RobotActionBehavior(py_trees.behaviour.Behaviour):
             self._bb_client.register_key(key=key, access=py_trees.common.Access.WRITE)
 
         self._thread: threading.Thread | None = None
+        # Every worker this node started that may still be running. A node
+        # re-entered by a retry or a fallback starts a new worker, and an
+        # earlier one that was interrupted can still be alive.
+        self._workers: list[threading.Thread] = []
         self._result: ExecutionResult | None = None
+        # Bumped by each initialise(), so a worker from an earlier entry cannot
+        # hand its result to the current one.
+        self._generation = 0
+        # Set only by request_halt(). While None, terminate() does nothing and
+        # an interrupted action runs to completion, as it always has.
+        self._halt_deadline: float | None = None
         self._lock = threading.Lock()
 
     def initialise(self) -> None:
@@ -63,21 +74,49 @@ class RobotActionBehavior(py_trees.behaviour.Behaviour):
             for key, value in self.params.items()
         }
         action = _build_task_action(self.action_type, resolved_params)
-
-        def _run_action() -> None:
-            result = self.robot.execute_action(action, realtime_factor=self.realtime_factor)
-            with self._lock:
-                self._result = result
+        robot = self.robot
 
         with self._lock:
+            self._generation += 1
+            generation = self._generation
             self._result = None
-        self._thread = threading.Thread(target=_run_action, daemon=True)
-        self._thread.start()
+
+        def _run_action() -> None:
+            result: ExecutionResult | None = None
+            try:
+                result = robot.execute_action(action, realtime_factor=self.realtime_factor)
+            except Exception as exc:
+                # Robot.execute_action has no try/finally. Without this, an
+                # exception (pick with no object, place with a dict pose) left
+                # executing_action set forever: the node reported RUNNING
+                # forever and robot.cancel_actions() could never return.
+                result = ExecutionResult(
+                    status=ExecutionStatus.EXECUTION_FAILURE,
+                    message=f"{action.type} raised {exc!r}",
+                )
+            finally:
+                _release_robot_flags(robot, action)
+                if result is None:
+                    result = ExecutionResult(
+                        status=ExecutionStatus.EXECUTION_FAILURE,
+                        message=f"{action.type} worker exited without a result",
+                    )
+                with self._lock:
+                    if generation == self._generation:
+                        self._result = result
+
+        thread = threading.Thread(target=_run_action, daemon=True)
+        self._workers = [worker for worker in self._workers if worker.is_alive()]
+        self._workers.append(thread)
+        self._thread = thread
+        thread.start()
 
     def update(self) -> py_trees.common.Status:
-        if self.robot.is_busy():
-            return py_trees.common.Status.RUNNING
-
+        # Read the worker's result before looking at the robot's busy flags.
+        # A finished worker has always cleared the flags it set, so for a
+        # normal action this is the same as checking is_busy() first; it
+        # differs only when a flag is held by something else, which must not
+        # keep this node RUNNING forever.
         with self._lock:
             result = self._result
 
@@ -90,6 +129,49 @@ class RobotActionBehavior(py_trees.behaviour.Behaviour):
             if result.is_success()
             else py_trees.common.Status.FAILURE
         )
+
+    def live_workers(self) -> list[threading.Thread]:
+        """Worker threads started by this node that are still running."""
+        return [worker for worker in list(self._workers) if worker.is_alive()]
+
+    def request_halt(self, deadline: float) -> None:
+        """Arm terminate() to stop this node's action, finishing by `deadline`.
+
+        `deadline` is a time.monotonic() value. Called by the executor when it
+        abandons a tree (timeout or cancel) just before stopping the root.
+        """
+        self._halt_deadline = deadline
+
+    def terminate(self, new_status: py_trees.common.Status) -> None:
+        # py_trees calls terminate() on every completion and on every priority
+        # interrupt. Only a halt requested by the executor stops anything, so
+        # a tree that finishes by itself runs exactly as before.
+        deadline = self._halt_deadline
+        if new_status != py_trees.common.Status.INVALID or deadline is None:
+            return
+        self.halt(max(0.0, deadline - time.monotonic()))
+
+    def halt(self, limit_s: float) -> bool:
+        """Cancel this node's in-flight action and wait for its workers.
+
+        Navigation is the only interruptible action. The cancel flag is
+        re-sent on every pass, because PathExecutor.execute() clears one that
+        arrives while the path is still being planned. Pick, place, detect,
+        open and close are short and run to completion. Returns True once no
+        worker started by this node is alive; after that nothing it started
+        can move the robot or write the blackboard.
+        """
+        end = time.monotonic() + max(0.0, limit_s)
+        while True:
+            alive = self.live_workers()
+            if not alive:
+                return True
+            cancel_navigation(self.robot)
+            remaining = end - time.monotonic()
+            if remaining <= 0.0:
+                return False
+            for worker in alive:
+                worker.join(timeout=min(0.05, remaining))
 
     def _write_outputs(self, result: ExecutionResult) -> None:
         for value_name, bb_key in self.outputs.items():
@@ -164,6 +246,31 @@ class RobotActionBehavior(py_trees.behaviour.Behaviour):
                 # prompts and the vocabulary say "bread".
                 held = self.robot.manipulated_object
                 self._bb_client.set(bb_key, getattr(held, "category", None) or NONE_SENTINEL)
+
+
+def cancel_navigation(robot: Any) -> None:
+    """Ask the robot's path executor to stop, if a navigation is in progress."""
+    executor = getattr(robot, "path_executor", None)
+    if getattr(robot, "executing_nav", False) and executor is not None:
+        executor.cancel_execution = True
+
+
+def _release_robot_flags(robot: Any, action: TaskAction) -> None:
+    """Clear the busy flags that `robot.execute_action(action)` set, if it raised.
+
+    execute_action clears current_action and executing_action only on a normal
+    return, so after one does they are already clear and nothing happens here.
+    `current_action is action` means this call set them and nobody replaced
+    them since. For a navigate that raised on this thread nothing is moving
+    (the NavRunner is started only by the signal that follows the checks that
+    can raise), so executing_nav is cleared too.
+    """
+    if getattr(robot, "current_action", None) is not action:
+        return
+    if action.type == "navigate":
+        robot.executing_nav = False
+    robot.current_action = None
+    robot.executing_action = False
 
 
 def _object_location_name(obj: Any) -> str | None:

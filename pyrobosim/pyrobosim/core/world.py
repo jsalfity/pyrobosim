@@ -1230,6 +1230,11 @@ class World:
             self.gui.canvas.show_robots_signal.emit()
         if (self.ros_node is not None) and remove_ros_interfaces:
             self.ros_node.remove_robot_ros_interfaces(resolved_robot)
+        # Detach the robot. reset() removes every robot and builds new ones, so
+        # anything still holding the old instance (an action thread finishing a
+        # pick or place) must not be able to resolve, move or re-parent the
+        # entities of the rebuilt world.
+        resolved_robot.world = None
 
         # Find the new max inflation radius and revert it.
         new_inflation_radius = max(
