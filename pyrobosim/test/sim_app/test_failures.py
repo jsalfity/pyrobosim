@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.request
 from pathlib import Path
 from typing import Iterator
@@ -104,3 +105,34 @@ def test_no_profile_leaves_robots_alone() -> None:
         assert context.failure_info()["profile"] is None
     finally:
         world.shutdown()
+
+
+# A policy whose rules can never apply: every tick fails without starting an action.
+NOTHING_APPLIES = (
+    '<root main_tree_to_execute="Main"><BehaviorTree ID="Main">'
+    '<Selector name="rules" memory="false">'
+    '<Check name="goal" key="held_category" operator="==" value="bread"/>'
+    '<Sequence name="rule" memory="false">'
+    '<Check name="nowhere" key="robot_location" operator="==" value="nowhere"/>'
+    '<navigate name="go" target_location="pantry"/>'
+    "</Sequence></Selector></BehaviorTree></root>"
+)
+
+
+@pytest.mark.parametrize(
+    "policy_mode, patience, ticks",
+    [(True, 0, 1), (True, 1, 1), (True, 4, 4), (False, 4, 1)],
+)
+def test_failure_patience_counts_failed_ticks_in_policy_mode(
+    ctx: server.SimContext, policy_mode: bool, patience: int, ticks: int
+) -> None:
+    ctx.reset_world(deterministic=True)
+    run_id = ctx.start_bt(NOTHING_APPLIES, None, 20, print_every=0, policy_mode=policy_mode,
+                          timeout_s=30, failure_patience=patience)
+    end = time.monotonic() + 30
+    while ctx.bt_status(run_id)["status"] == "RUNNING":
+        assert time.monotonic() < end
+        time.sleep(0.02)
+    status = ctx.bt_status(run_id)
+    assert status["status"] == "FAILURE"
+    assert status["tick_count"] == ticks

@@ -315,6 +315,7 @@ class SimContext:
         max_ticks: int = 0,
         timeout_s: float = 0.0,
         blackboard: dict[str, Any] | None = None,
+        failure_patience: int = 0,
     ) -> str:
         """Start a behavior tree execution in a background thread.
 
@@ -333,8 +334,13 @@ class SimContext:
           keep ticking. The tree ends itself: a backward-chaining planner puts
           its goal condition as the first child of the root fallback, so once
           the goal holds that child succeeds without any action running, and the
-          run stops. FAILURE still terminates immediately -- it means no rule is
-          applicable, which is a genuine policy failure. ``max_ticks`` bounds
+          run stops. A FAILURE means no rule is applicable this tick. With
+          ``failure_patience`` 0 it ends the run; with N > 0 the run ends only
+          after N failed ticks in a row, so a rule whose action just failed
+          can fire again on the next tick, as LLM-OBTEA's own runtime
+          (RoboWaiter's Robot.step, which ticks every period whatever the
+          status) would let it. N failed ticks in a row mean nothing is
+          applicable and nothing is running, so nothing will change. ``max_ticks`` bounds
           livelock, where a policy oscillates between rules without progress
           (e.g. navigate/detect when the world does not match the action model).
 
@@ -360,6 +366,7 @@ class SimContext:
                 max_ticks=max_ticks,
                 timeout_s=timeout_s,
                 blackboard=blackboard,
+                failure_patience=failure_patience,
             )
 
     def _start_bt_locked(
@@ -373,6 +380,7 @@ class SimContext:
         max_ticks: int,
         timeout_s: float,
         blackboard: dict[str, Any] | None,
+        failure_patience: int = 0,
     ) -> str:
         robot = self.get_robot(robot_name)
         # The blackboard is process-global and is not otherwise reset, so
@@ -432,6 +440,8 @@ class SimContext:
             abandoned: str | None = None
             timeout_source: str | None = None
             tick_error: str | None = None
+            # Consecutive ticks whose root failed (policy mode only).
+            failed_ticks = 0
 
             while True:
                 if cancel_event.is_set():
@@ -449,7 +459,11 @@ class SimContext:
 
                 status = tree.root.status
                 if status == py_trees.common.Status.FAILURE:
-                    break
+                    failed_ticks += 1
+                    if not policy_mode or failed_ticks >= max(1, failure_patience):
+                        break
+                else:
+                    failed_ticks = 0
                 if status == py_trees.common.Status.SUCCESS:
                     # A plan's root succeeds only when the task is complete. A
                     # policy's root succeeds whenever any rule fires, so keep
@@ -848,6 +862,8 @@ class ControlHandler(BaseHTTPRequestHandler):
         # ticking past a root SUCCESS; see SimContext.start_bt.
         policy_mode = bool(data.get("policy_mode", False))
         max_ticks = int(data.get("max_ticks", 0))
+        # Policy mode only: failed ticks in a row before a run ends (0: the first).
+        failure_patience = int(data.get("failure_patience", 0))
         # Server-side deadline in seconds (0 or absent: none, the old behaviour).
         try:
             timeout_s = float(data.get("timeout_s") or 0.0)
@@ -865,6 +881,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                 max_ticks=max_ticks,
                 timeout_s=timeout_s,
                 blackboard=blackboard,
+                failure_patience=failure_patience,
             )
         except (RunStillAliveError, ControlBusyError) as exc:
             self._send_refused(exc)
