@@ -1,0 +1,17 @@
+# Skill failures for the sim_app (--failures harsh), in PyRoboSim's own
+# action_execution_options format. Each call to a skill succeeds with
+# success_probability; on a loss it fails without changing the world.
+#
+# The cluttered end of OK-Robot's real-home error rates (4-15% navigation,
+# 13-25% manipulation), close to PyRoboSim's own test world (navigate 0.9,
+# pick 0.75, place 0.75).
+#
+# rng_seed is used only when a reset gives no seed; sim_app derives each
+# skill's stream from the reset's seed otherwise (SimContext._apply_failures).
+action_execution_options:
+  navigate: {success_probability: 0.85, rng_seed: 1}
+  pick: {success_probability: 0.75, rng_seed: 2}
+  place: {success_probability: 0.85, rng_seed: 3}
+  detect: {success_probability: 0.85, rng_seed: 4}
+  open: {success_probability: 0.85, rng_seed: 5}
+  close: {success_probability: 0.85, rng_seed: 6}

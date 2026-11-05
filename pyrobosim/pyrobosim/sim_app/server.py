@@ -12,7 +12,8 @@ Endpoints:
     POST /bt_status - Get status of a running BT
     POST /world_state - Get current world state (robot location, held object, objects)
     POST /world_entities - Get world vocabulary (locations, objects, categories)
-    POST /reset_world - Reset world to initial state
+    POST /reset_world - Reset world to initial state (seed >= 0 also seeds the skill failures)
+    GET|POST /failures - The skill failure profile in force and the last reset seed
     POST /reload_world - Reload world from file
     POST /cancel_bt - Stop one run ({"run_id": ...}) or every run ({"all": true});
                       answers once the run has stopped or the join bound expired
@@ -38,7 +39,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Iterator
 
+import numpy as np
 import py_trees
+import yaml
 from pyrobosim.behaviors import (
     RobotActionBehavior,
     blackboard_keys,
@@ -47,6 +50,7 @@ from pyrobosim.behaviors import (
 )
 from pyrobosim.core import World, WorldYamlLoader
 from pyrobosim.gui import start_gui
+from pyrobosim.planning.actions import ExecutionOptions
 from pyrobosim.sim_app.world_entities import build_world_entities
 from pyrobosim.utils.general import get_data_folder
 
@@ -154,9 +158,21 @@ def _halt_actions(
 class SimContext:
     """Context for managing world, robots, and BT executions."""
 
-    def __init__(self, world: World, world_file: Path | None) -> None:
+    def __init__(
+        self,
+        world: World,
+        world_file: Path | None,
+        failures: dict[str, dict[str, Any]] | None = None,
+        failure_profile: str | None = None,
+    ) -> None:
         self.world = world
         self.world_file = world_file
+        # Skill failures in PyRoboSim's action_execution_options format (see
+        # load_failure_profile). None leaves the robots as the world made them.
+        self.failures = failures
+        self.failure_profile = failure_profile
+        self.failure_seed: int | None = None
+        self._apply_failures(None)
         self.bt_runs: dict[str, dict[str, Any]] = {}
         # Guards bt_runs. Held only briefly, and never while joining a thread:
         # the runner thread takes it to publish its tick count and status.
@@ -614,10 +630,40 @@ class SimContext:
         A run left alive keeps the Robot it was built with, which reset
         replaces, and a reset that races a pick or place can hang in
         World.remove_location. Raises RunStillAliveError if a run will not stop.
+        A seed >= 0 also seeds the skill failures, so a reset with the same
+        seed gives the same failures; see _apply_failures.
         """
         with self._exclusive("reset the world"):
             self._require_no_live_runs("reset the world")
-            return self.world.reset(deterministic=deterministic, seed=seed)
+            ok = self.world.reset(deterministic=deterministic, seed=seed)
+            self._apply_failures(seed if seed >= 0 else None)
+            return ok
+
+    def _apply_failures(self, seed: int | None) -> None:
+        """Give every robot the failure profile's skill failures.
+
+        World.reset() rebuilds the robots from YAML, so failures written into
+        the world file would restart each skill's draws from the same seed on
+        every reset, and every rollout would fail in the same places. The
+        profile is applied after every load and reset instead. With a seed,
+        each skill draws from its own stream derived from (seed, skill);
+        without one, from the profile's own rng_seed.
+        """
+        self.failure_seed = seed
+        if not self.failures:
+            return
+        for robot in self.world.robots:
+            options: dict[str, ExecutionOptions] = {}
+            for index, (skill, settings) in enumerate(sorted(self.failures.items())):
+                kwargs = dict(settings)
+                if seed is not None:
+                    kwargs["rng_seed"] = int(np.random.SeedSequence([seed, index]).generate_state(1)[0])
+                options[skill] = ExecutionOptions(**kwargs)
+            robot.action_execution_options = options
+
+    def failure_info(self) -> dict[str, Any]:
+        """The failure profile in force and the seed of the last reset."""
+        return {"profile": self.failure_profile, "action_execution_options": self.failures, "seed": self.failure_seed}
 
     def reload_world(self) -> bool:
         """Reload world from file, after stopping and joining any live BT run."""
@@ -631,6 +677,7 @@ class SimContext:
         gui = self.world.gui
         new_world = WorldYamlLoader().from_file(self.world_file)
         self.world = new_world
+        self._apply_failures(None)
         if gui is not None:
             gui.set_world(new_world)
             # Reinitialize robot visualization including sensor artists
@@ -665,11 +712,14 @@ class ControlHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         """Handle GET requests (read-only endpoints)."""
-        if self.path != "/live_runs":
+        if self.path not in ("/live_runs", "/failures"):
             self._send_json({"error": "not_found"}, status=404)
             return
         if self.context is None:
             self._send_json({"error": "no_context"}, status=500)
+            return
+        if self.path == "/failures":
+            self._send_json(self.context.failure_info())
             return
         self._send_json(self.context.live_runs())
 
@@ -684,6 +734,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             "/reload_world",
             "/cancel_bt",
             "/live_runs",
+            "/failures",
         ):
             self._send_json({"error": "not_found"}, status=404)
             return
@@ -710,6 +761,10 @@ class ControlHandler(BaseHTTPRequestHandler):
 
         if self.path == "/live_runs":
             self._send_json(self.context.live_runs())
+            return
+
+        if self.path == "/failures":
+            self._send_json(self.context.failure_info())
             return
 
         if self.path == "/cancel_bt":
@@ -830,6 +885,25 @@ def start_control_server(context: SimContext, host: str, port: int) -> Threading
     return server
 
 
+def load_failure_profile(profile: str | Path) -> tuple[str, dict[str, dict[str, Any]]]:
+    """(name, action_execution_options) from a failure profile.
+
+    `profile` is a name in data/failure_profiles (nominal, harsh) or a path to
+    a YAML file with an `action_execution_options` mapping in PyRoboSim's own
+    format: skill -> ExecutionOptions arguments.
+    """
+    path = Path(profile)
+    if not path.suffix:
+        path = DATA_FOLDER / "failure_profiles" / f"{profile}.yaml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    options = data.get("action_execution_options")
+    if not isinstance(options, dict) or not options:
+        raise ValueError(f"{path} has no action_execution_options")
+    for settings in options.values():
+        ExecutionOptions(**settings)  # rejects an unknown argument now, not mid-run
+    return path.stem, options
+
+
 def load_world(world_file: str | Path) -> tuple[World, Path]:
     """Load world from file."""
     loader = WorldYamlLoader()
@@ -866,15 +940,30 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1", help="Control server host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=9001, help="Control server port (default: 9001)")
+    parser.add_argument(
+        "--failures",
+        default=None,
+        help="Skill failure profile: a name in data/failure_profiles (nominal, harsh) or a YAML path",
+    )
+    parser.add_argument("--headless", action="store_true", help="Run the control server without the GUI")
     args = parser.parse_args()
 
     print(f"Loading world from: {args.world_file}")
     world, world_file = load_world(args.world_file)
 
     print(f"World loaded with {len(world.robots)} robot(s)")
-    context = SimContext(world, world_file)
+    failures, profile = None, None
+    if args.failures:
+        profile, failures = load_failure_profile(args.failures)
+        print(f"Skill failures: {profile} {failures}")
+    context = SimContext(world, world_file, failures=failures, failure_profile=profile)
 
     start_control_server(context, args.host, args.port)
+
+    if args.headless:
+        print("Running headless (Ctrl+C to stop)...")
+        threading.Event().wait()
+        return
 
     print("Starting GUI (this will block until GUI is closed)...")
     start_gui(world)
