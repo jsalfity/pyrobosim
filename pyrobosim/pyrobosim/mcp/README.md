@@ -34,13 +34,13 @@ The MCP server will:
 - Load BT schema from `data/bt_schema.yaml`
 - Load rootstock BT templates from `data/rootstocks.yaml`
 - Fetch live world vocabulary (rooms, locations, object spawns, objects) from sim_app server
-- Save generated BTs to `jsons/` subdirectory (in current working directory)
+- Save generated BTs (py_trees XML) to `trees/` subdirectory (in current working directory)
 - Log generations to `submissions.jsonl` with `valid`, `issues`, and `attempt_number` per submission
 
 **Batch Directory Structure:**
 ```
 generated/2026-03-16_18-07/
-  jsons/               # BT JSON files (created by MCP)
+  trees/               # BT XML files (created by MCP)
   submissions.jsonl    # Generation log (created by MCP)
   results.json         # Evaluation results (created by bt-eval-harness)
   results_summary.json # Summary (created by bt-eval-harness)
@@ -79,7 +79,7 @@ Restart Claude Desktop to connect.
 
 When connected, Claude can:
 - `get_skills` - Get available robot skills (navigate, detect, pick, place, open, close)
-- `get_bt_schema` - Get behavior tree JSON schema
+- `get_bt_format` - Get the behavior tree format (py_trees XML)
 - `get_world_entities` - Get current world vocabulary (rooms, locations, objects)
 - `list_rootstocks_tool` - Get canonical BT composition templates for common task patterns
 - `send_to_robot` - Validate, save, and log a BT; returns `attempt_number` and `static_validation`. Returns `success=false` with `reason="max_attempts_reached"` once the per-session cap (default 10) is hit.
@@ -104,4 +104,4 @@ Use them as scaffolding for synthesis, then fill slots with exact world vocabula
 - `skills.py` - Helper to load skill schemas for validation
 - `bt_schema.py` - Helper to load BT schema
 - `data/skills.yaml` - PyRoboSim skill definitions
-- `data/bt_schema.yaml` - Behavior tree JSON schema
+- `data/bt_schema.yaml` - Behavior tree format (py_trees XML)

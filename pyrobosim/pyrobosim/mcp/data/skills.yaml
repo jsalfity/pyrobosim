@@ -1,17 +1,9 @@
 skills:
   - name: navigate
-    description: Plan and follow a path to a target location or pose. Use location names from the world vocabulary (e.g., pantry, fridge, table). The robot will automatically navigate to the appropriate position for interacting with objects at that location.
+    description: Plan and follow a path to a target location. Use location names from the world vocabulary (e.g., pantry, fridge, table). The robot will automatically navigate to the appropriate position for interacting with objects at that location.
     params:
       target_location:
         type: string
-        source: [literal, blackboard]
-        required: false
-      pose:
-        type: pose
-        source: [literal, blackboard]
-        required: false
-      path:
-        type: path
         source: [literal, blackboard]
         required: false
     outputs: [status, message, last_nav_result, battery_level, robot_location, held_object, held_category, objects_here, open_locations]
@@ -23,19 +15,11 @@ skills:
         type: string
         source: [literal, blackboard]
         required: false
-      pose:
-        type: pose
-        source: [literal, blackboard]
-        required: false
     outputs: [status, message, battery_level, robot_location, held_object, held_category, objects_here, open_locations]
 
   - name: place
     description: Place the currently held object at the current location. The robot must be at a location where objects can be placed (navigate to a location first).
-    params:
-      pose:
-        type: pose
-        source: [literal, blackboard]
-        required: false
+    params: {}
     outputs: [status, message, battery_level, robot_location, held_object, held_category, objects_here, open_locations]
 
   - name: detect

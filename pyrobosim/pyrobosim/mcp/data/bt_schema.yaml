@@ -1,79 +1,87 @@
-schema_version: "1.0"
-description: "PyRoboSim behavior tree JSON format."
-notes:
-  - "Top-level BT JSON must include a `root` object."
-  - "Memory rule: set memory=true on any sequence/selector that contains action nodes, so completed actions are not re-run on subsequent ticks."
-  - "Use memory=false only for purely reactive condition/sensor chains that should re-evaluate from the start every tick."
-node_types: [sequence, selector, parallel, decorator, condition, action]
+schema_version: "2.0"
+format: py_trees BehaviorTree XML
+description: >-
+  A behavior tree is one XML document in py_trees' BehaviorTree format. Send
+  the whole document as a single string. The robot builds it with py_trees'
+  own XML parser, so anything the parser rejects is rejected here too.
+document: |
+  <root main_tree_to_execute="Main">
+    <BehaviorTree ID="Main">
+      <!-- exactly one node here: the root of the tree -->
+    </BehaviorTree>
+  </root>
+rules:
+  - "Give every node a name attribute, unique across the whole tree."
+  - "Sequence and Selector must say memory=\"true\" or memory=\"false\". py_trees assumes true when it is left out."
+  - "memory=\"true\" keeps a composite's place between ticks, so completed actions are not re-run. Use it on chains of actions."
+  - "memory=\"false\" starts from the first child every tick. Use it to keep checking a condition ahead of a chain of actions, so the tree notices when the condition stops holding, such as a dropped object."
+  - "Every action refreshes the state_keys when it finishes, without the tree naming them. A Check can read them; before the first action finishes they are unwritten, and a Check on them fails."
+  - "Curly braces are allowed only in skill inputs and outputs, where \"{key}\" names a blackboard key."
+node_types: [Sequence, Selector, Parallel, Retry, Inverter, Check, skill]
 
-action_node:
-  type: action
-  fields:
+composites:
+  Sequence:
+    attributes: {name: string, memory: "true | false"}
+    children: one or more
+    behaviour: Runs its children in order and succeeds when all succeed; fails as soon as one fails.
+  Selector:
+    attributes: {name: string, memory: "true | false"}
+    children: one or more
+    behaviour: Tries its children in order and succeeds as soon as one succeeds; fails when all fail. Fallback is accepted as a synonym.
+  Parallel:
+    attributes: {name: string, policy: "success_on_all | success_on_one"}
+    children: one or more
+    behaviour: Ticks all children every tick.
+
+decorators:
+  Retry:
+    attributes: {name: string, num_failures: integer}
+    children: exactly one
+    behaviour: Runs its child again after a failure, until the child has failed num_failures times.
+  Inverter:
+    attributes: {name: string}
+    children: exactly one
+    behaviour: Turns the child's success into failure and failure into success.
+
+skill:
+  tag: The skill's name from list_skills, for example <navigate name="go" target_location="pantry"/>.
+  attributes:
     name: string
-    action: string
-    params:
-      param_format:
-        literal: any
-        blackboard:
-          source: blackboard
-          key: string
-          default: any
-        pose:
-          pose:
-            x: float
-            y: float
-            yaw: float
-        path:
-          path:
-            - x: float
-              y: float
-              yaw: float
-    outputs:
-      status: blackboard_key
-      message: blackboard_key
-      result: blackboard_key
-      detected_objects: blackboard_key
-      detected_categories: blackboard_key
-      battery_level: blackboard_key
-      last_nav_result: blackboard_key
-      # World-state outputs. The keys above report what the action just did;
-      # these report the state of the world after it ran.
-      #   robot_location: name of the robot's current location, or null when
-      #     it is between locations.
-      #   held_object: name of the grasped object, or the string "__none__"
-      #     when the gripper is empty. A never-written key also reads as null,
-      #     so the sentinel is what makes "holding nothing" testable.
-      robot_location: blackboard_key
-      held_object: blackboard_key
-      held_category: blackboard_key
-      objects_here: blackboard_key
-      open_locations: blackboard_key
+    inputs: The skill's params from list_skills. A literal value, or "{key}" to read the value from a blackboard key.
+    outputs: Any of the skill's outputs from list_skills, as output="{key}", to write that output to a blackboard key when the action finishes.
+  output_meanings:
+    status: The action's result, such as SUCCESS or EXECUTION_FAILURE.
+    message: The action's result message.
+    detected_objects: Names of the objects the last detect found.
+    detected_categories: Categories of the objects the last detect found.
+    battery_level: Battery level after the action.
+    last_nav_result: Result of the last navigation.
+    held_object: Name of the object in the gripper, or __none__ when it is empty.
 
-condition_node:
-  type: condition
-  fields:
+condition:
+  tag: Check
+  attributes:
     name: string
-    key: blackboard_key
-    operator: ["==", "!=", ">", ">=", "<", "<=", in, contains, truthy]
-    value: any
+    key: A blackboard key, without braces, such as held_category.
+    operator: "== | != | > | >= | < | <= | in | contains | not_contains | truthy"
+    value: JSON when it parses as JSON (a list such as ["table", "desk"], or a number), otherwise a string. Not used by truthy.
+  behaviour: Succeeds when the key's value satisfies the comparison; fails otherwise, and fails when nothing has written the key yet.
+  example: <Check name="holding_bread" key="held_category" operator="==" value="bread"/>
 
-composite_nodes:
-  sequence:
-    children: list
-    memory: bool
-  selector:
-    children: list
-    memory: bool
-  parallel:
-    children: list
-    policy: [success_on_all, success_on_one]
+state_keys:
+  robot_location: "Name of the robot's current location, such as table or pantry (not table_tabletop)."
+  held_category: "Category of the object in the gripper, or __none__ when it is empty."
+  objects_here: "Categories of the objects at the robot's current location."
+  open_locations: "Names of the locations that are currently open."
 
-decorator_node:
-  type: decorator
-  fields:
-    decorator: [inverter, retry]
-    num_failures: int
-    child: node
-
-blackboard:
-  initial: dict
+example: |
+  <root main_tree_to_execute="Main">
+    <BehaviorTree ID="Main">
+      <Sequence name="fetch_bread" memory="true">
+        <navigate name="go_to_pantry" target_location="pantry"/>
+        <open name="open_pantry"/>
+        <detect name="look_for_bread" object="bread"/>
+        <pick name="pick_bread" object="bread"/>
+      </Sequence>
+    </BehaviorTree>
+  </root>

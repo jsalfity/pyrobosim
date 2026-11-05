@@ -1,4 +1,4 @@
-"""PyRoboSim MCP Server - exposes skills and accepts BT JSONs via MCP protocol."""
+"""PyRoboSim MCP Server - exposes skills and accepts BTs in py_trees XML via MCP protocol."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def create_server(
     Create PyRoboSim MCP server instance.
 
     Args:
-        generated_dir: Directory to save generated BT JSONs
+        generated_dir: Directory to save generated BTs (XML)
         submission_file: Path to evaluation submission log (JSONL)
         world_file: Deprecated, not used (vocabulary comes from sim_app)
         control_url: URL of sim_app server for live vocabulary (e.g., http://localhost:8080)
@@ -41,7 +41,7 @@ def create_server(
     """
     # Default paths - use current working directory (configurable via CLI)
     if generated_dir is None:
-        generated_dir = Path.cwd() / "jsons"
+        generated_dir = Path.cwd() / "trees"
         generated_dir.mkdir(parents=True, exist_ok=True)
 
     if submission_file is None:
@@ -49,8 +49,12 @@ def create_server(
 
     # Create PyRoboSim providers
     skill_provider = PyRoboSimSkillProvider()
-    bt_schema_provider = PyRoboSimBTSchemaProvider()
     world_provider = PyRoboSimWorldProvider(control_url=control_url)
+    # In XML mode bt-mcp-server hands all validation to this provider,
+    # including the vocabulary check it would otherwise do itself.
+    bt_schema_provider = PyRoboSimBTSchemaProvider(
+        world_provider=world_provider, check_vocabulary=bool(control_url)
+    )
     rootstocks_provider = PyRoboSimRootstocksProvider()
 
     # Server configuration
@@ -62,6 +66,7 @@ def create_server(
         check_vocabulary=bool(control_url),  # Enable vocab check if sim_app URL provided
         expose_rootstocks=expose_rootstocks,
         restrict_control_flow=restrict_control_flow,
+        bt_format="xml",
     )
 
     # Create MCP server with PyRoboSim providers
@@ -88,7 +93,7 @@ def main():
     parser.add_argument(
         "--generated-dir",
         type=Path,
-        help="Directory to save generated BT JSONs",
+        help="Directory to save generated BTs (XML)",
     )
     parser.add_argument(
         "--submission-file",
@@ -104,7 +109,7 @@ def main():
     parser.add_argument(
         "--restrict-control-flow",
         action="store_true",
-        help="Restrict to sequence-only BTs (no selector/parallel/decorator)",
+        help="Offer Sequence as the only control node (no Selector, Parallel or decorators)",
     )
     parser.add_argument(
         "--no-rootstocks",
@@ -144,7 +149,7 @@ def main():
     print("\nMCP tools available:")
     print("  - list_skills()")
     print("  - get_bt_format()")
-    print("  - send_to_robot(bt_json, ...)")
+    print("  - send_to_robot(bt, ...)  # bt: py_trees XML string")
     print("  - list_world_entities()")
     if not args.no_rootstocks:
         print("  - list_rootstocks_tool()")

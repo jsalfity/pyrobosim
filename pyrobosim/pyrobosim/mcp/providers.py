@@ -11,6 +11,8 @@ import yaml
 
 from bt_mcp.providers import BTSchemaProvider, RootstocksProvider, SkillProvider, WorldEntitiesProvider
 
+from .validation import validate_bt_xml, vocabulary_from_entities
+
 _DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
@@ -47,41 +49,54 @@ class PyRoboSimSkillProvider(SkillProvider):
 
 
 class PyRoboSimBTSchemaProvider(BTSchemaProvider):
-    """Provides PyRoboSim BT JSON schema from YAML."""
+    """Provides the PyRoboSim BT format (py_trees XML) and validates trees against it."""
 
-    def __init__(self, schema_file: Path | None = None):
+    def __init__(
+        self,
+        schema_file: Path | None = None,
+        world_provider: WorldEntitiesProvider | None = None,
+        check_vocabulary: bool = False,
+    ):
         """
         Initialize BT schema provider.
 
         Args:
             schema_file: Path to bt_schema.yaml (defaults to data/bt_schema.yaml)
+            world_provider: Source of the world vocabulary for the vocabulary check
+            check_vocabulary: Check that skill inputs name things in the world
         """
         self.schema_file = schema_file or (_DATA_DIR / "bt_schema.yaml")
+        self.world_provider = world_provider
+        self.check_vocabulary = check_vocabulary
 
     def get_schema(self, restrict_control_flow: bool = False) -> dict[str, Any]:
         """
         Load and return BT schema from YAML.
 
         Args:
-            restrict_control_flow: If True, restrict to sequence-only (removes selector/parallel/decorator)
+            restrict_control_flow: If True, offer Sequence as the only control node
 
         Returns:
-            BT JSON schema specification
+            BT format specification
         """
         data = yaml.safe_load(self.schema_file.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return {}
 
         if restrict_control_flow:
-            # For sequence-only baseline: remove selector, parallel, decorator
             data = data.copy()
-            data["node_types"] = ["sequence", "action", "condition"]
-            # Remove non-sequence composite nodes from schema
-            if "composite_nodes" in data:
-                composite = data["composite_nodes"]
-                data["composite_nodes"] = {"sequence": composite.get("sequence", {})}
+            data["node_types"] = ["Sequence", "Check", "skill"]
+            data["composites"] = {"Sequence": data.get("composites", {}).get("Sequence", {})}
+            data.pop("decorators", None)
 
         return data
+
+    def validate_bt(self, bt: str, restrict_control_flow: bool = False) -> list[dict[str, Any]]:
+        """Issues with a tree, or [] when the robot would accept it (see mcp/validation.py)."""
+        vocabulary = None
+        if self.check_vocabulary and self.world_provider is not None:
+            vocabulary = vocabulary_from_entities(self.world_provider.get_entities(mode="vocab"))
+        return validate_bt_xml(bt, restrict_control_flow=restrict_control_flow, vocabulary=vocabulary)
 
 
 class PyRoboSimRootstocksProvider(RootstocksProvider):

@@ -14,11 +14,11 @@ This exposes PyRoboSim skills via the Model Context Protocol.
 
 ### 2. Generate a BT (using MCP client)
 
-Use an MCP client (e.g., Claude Code) to generate a behavior tree JSON file. The server provides these tools:
+Use an MCP client (e.g., Claude Code) to generate a behavior tree XML file. The server provides these tools:
 
 - `list_skills()` - Get available PyRoboSim skills
-- `get_bt_format()` - Get the BT JSON schema
-- `send_to_robot(bt_json, ...)` - Validate and save a BT
+- `get_bt_format()` - Get the BT format (py_trees XML)
+- `send_to_robot(bt, ...)` - Validate and save a BT (an XML string)
 - `list_world_entities()` - Get world vocabulary (rooms, objects, etc.)
 
 Generated BTs are saved to `./generated/` by default.
