@@ -19,11 +19,12 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Iterator
+from xml.sax.saxutils import quoteattr
 
 import py_trees
 import pytest
 
-from pyrobosim.behaviors import RobotActionBehavior
+from pyrobosim.behaviors import RobotActionBehavior, build_pyrobosim_tree_from_xml
 from pyrobosim.core.robot import Robot
 from pyrobosim.planning.actions import ExecutionStatus, TaskAction
 from pyrobosim.sim_app import server
@@ -34,96 +35,80 @@ WORLD_FILE = "roscon_2024_workshop_world.yaml"
 #####################
 # Tree construction #
 #####################
-def cond(key: str, op: str, value: Any, name: str | None = None) -> dict[str, Any]:
-    return {
-        "type": "condition",
-        "name": name or f"{key}{op}{value}",
-        "key": key,
-        "operator": op,
-        "value": value,
-    }
+def cond(key: str, op: str, value: Any, name: str | None = None) -> str:
+    text = value if isinstance(value, str) else json.dumps(value)
+    return (
+        f"<Check name={quoteattr(name or f'{key}{op}{value}')} key={quoteattr(key)} "
+        f"operator={quoteattr(op)} value={quoteattr(text)}/>"
+    )
 
 
-def act(
-    name: str, action: str, params: dict[str, Any], outputs: dict[str, str]
-) -> dict[str, Any]:
-    return {
-        "type": "action",
-        "name": name,
-        "action": action,
-        "params": params,
-        "outputs": outputs,
-    }
+def act(name: str, action: str, params: dict[str, str], outputs: dict[str, str]) -> str:
+    """A skill node. `outputs` maps an output port to the blackboard key it writes."""
+    attrs = {"name": name, **params, **{port: "{" + key + "}" for port, key in outputs.items()}}
+    return f"<{action} " + " ".join(f"{k}={quoteattr(v)}" for k, v in attrs.items()) + "/>"
 
 
-def seq(*children: dict[str, Any], memory: bool = False) -> dict[str, Any]:
-    return {"type": "sequence", "memory": memory, "children": list(children)}
+def seq(*children: str, memory: bool = False) -> str:
+    return f'<Sequence memory="{str(memory).lower()}">' + "".join(children) + "</Sequence>"
+
+
+def tree(body: str) -> str:
+    return f'<root main_tree_to_execute="Main"><BehaviorTree ID="Main">{body}</BehaviorTree></root>'
 
 
 # Policy-shaped tree whose goal never holds: navigate desk <-> pantry forever.
 # Its keys carry a LEAK_ prefix, so any later appearance is attributable.
 NAV_OUT = {"robot_location": "LEAK_loc"}
-NAV_LIVELOCK = {
-    "blackboard": {"initial": {"LEAK_loc": "dining"}},
-    "root": {
-        "type": "selector",
-        "memory": False,
-        "children": [
-            cond("LEAK_loc", "==", "__never__", "goal_never_holds"),
-            seq(
-                cond("LEAK_loc", "==", "desk"),
-                act("nav_pantry", "navigate", {"target_location": "pantry_storage"}, NAV_OUT),
-            ),
-            act("nav_desk", "navigate", {"target_location": "desk_desktop"}, NAV_OUT),
-        ],
-    },
-}
+NAV_LIVELOCK = tree(
+    '<Selector memory="false">'
+    + cond("LEAK_loc", "==", "__never__", "goal_never_holds")
+    + seq(
+        cond("LEAK_loc", "==", "desk"),
+        act("nav_pantry", "navigate", {"target_location": "pantry_storage"}, NAV_OUT),
+    )
+    + act("nav_desk", "navigate", {"target_location": "desk_desktop"}, NAV_OUT)
+    + "</Selector>"
+)
+NAV_LIVELOCK_BLACKBOARD = {"LEAK_loc": "dining"}
 
 # Plan-shaped task: go to the pantry and pick the bread.
-TRIVIAL_PLAN = {
-    "root": seq(
-        act("nav_pantry", "navigate", {"target_location": "pantry_storage"}, {"robot_location": "robot_location"}),
+TRIVIAL_PLAN = tree(
+    seq(
+        act("nav_pantry", "navigate", {"target_location": "pantry_storage"}, {}),
         act("pick_bread", "pick", {"object": "bread"}, {"held_object": "held_object"}),
         memory=True,
     )
-}
+)
 
-PICK_WASTE = {
-    "root": seq(
+PICK_WASTE = tree(
+    seq(
         act("nav_desk", "navigate", {"target_location": "desk_desktop"}, {}),
         act("pick_waste", "pick", {"object": "waste0"}, {"held_object": "LEAK_held"}),
         memory=True,
     )
-}
+)
 
-PLACE_WASTE = {
-    "root": seq(
+PLACE_WASTE = tree(
+    seq(
         act("nav_desk", "navigate", {"target_location": "desk_desktop"}, {}),
         act("pick_waste", "pick", {"object": "waste0"}, {}),
         act("nav_table", "navigate", {"target_location": "table_tabletop"}, {}),
         act("place_waste", "place", {}, {"objects_here": "LEAK_here"}),
         memory=True,
     )
-}
+)
 
-# Banked failure modes that used to hang the executor: pick with no object
-# (UnboundLocalError inside Robot.pick_object) and place with a dict pose
-# (AttributeError inside Robot.place_object).
-PICK_NONE = {
-    "root": seq(
+# A banked failure mode that used to hang the executor: pick with no object
+# (UnboundLocalError inside Robot.pick_object). The other one, place with a
+# dict pose, cannot be written any more: skills no longer take a pose.
+PICK_NONE = tree(
+    seq(
         act("nav_desk", "navigate", {"target_location": "desk_desktop"}, {}),
         act("pick_nothing", "pick", {}, {"status": "pick_status"}),
         memory=True,
     )
-}
-PLACE_DICT_POSE = {
-    "root": seq(
-        act("nav_desk", "navigate", {"target_location": "desk_desktop"}, {}),
-        act("pick_waste", "pick", {"object": "waste0"}, {}),
-        act("place_dict_pose", "place", {"pose": {"x": 1.0, "y": 2.0}}, {"status": "place_status"}),
-        memory=True,
-    )
-}
+)
 
 
 ###########
@@ -214,7 +199,8 @@ def test_plan_tree_that_finishes_is_unaffected(ctx: server.SimContext) -> None:
 
 
 def test_cancel_while_navigating(ctx: server.SimContext) -> None:
-    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True)
+    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True,
+                          blackboard=NAV_LIVELOCK_BLACKBOARD)
     robot = ctx.get_robot()
     runner, actions = run_threads(ctx, run_id)
     assert wait_until(lambda: robot.is_busy() and robot.path_executor.following_path, 15.0)
@@ -243,7 +229,8 @@ def test_stop_cancels_navigation_left_behind_by_a_dead_runner(
     monkeypatch.setattr(RobotActionBehavior, "terminate", lambda self, new_status: None)
     real_cancel_navigation = server.cancel_navigation
     monkeypatch.setattr(server, "cancel_navigation", lambda robot: None)
-    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True)
+    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True,
+                          blackboard=NAV_LIVELOCK_BLACKBOARD)
     robot = ctx.get_robot()
     runner, actions = run_threads(ctx, run_id)
     assert wait_until(lambda: robot.path_executor.following_path, 15.0)
@@ -263,7 +250,7 @@ def test_stop_cancels_navigation_left_behind_by_a_dead_runner(
 
 @pytest.mark.parametrize("tree, method", [(PICK_WASTE, "pick_object"), (PLACE_WASTE, "place_object")])
 def test_cancel_while_manipulating(
-    ctx: server.SimContext, monkeypatch: pytest.MonkeyPatch, tree: dict[str, Any], method: str
+    ctx: server.SimContext, monkeypatch: pytest.MonkeyPatch, tree: str, method: str
 ) -> None:
     """Pick and place cannot be interrupted: the stop waits for them, then nothing is written."""
     delay_s = 0.5
@@ -323,7 +310,8 @@ def test_server_deadline_reports_timeout_after_stopping(ctx: server.SimContext) 
     timeout_s = 3.0
     start = time.monotonic()
     run_id = ctx.start_bt(
-        NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True, timeout_s=timeout_s
+        NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True, timeout_s=timeout_s,
+        blackboard=NAV_LIVELOCK_BLACKBOARD,
     )
     runner, actions = run_threads(ctx, run_id)
     status = wait_final(ctx, run_id, timeout_s + server.HALT_LIMIT_S + 2.0)
@@ -342,7 +330,8 @@ def test_server_deadline_reports_timeout_after_stopping(ctx: server.SimContext) 
 
 
 def test_tick_budget_timeout_also_stops_the_tree(ctx: server.SimContext) -> None:
-    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True, max_ticks=15)
+    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True,
+                          blackboard=NAV_LIVELOCK_BLACKBOARD, max_ticks=15)
     _, actions = run_threads(ctx, run_id)
     status = wait_final(ctx, run_id, 20.0)
     assert status["status"] == "TIMEOUT"
@@ -353,7 +342,8 @@ def test_tick_budget_timeout_also_stops_the_tree(ctx: server.SimContext) -> None
 
 
 def test_old_tree_never_writes_after_next_start(ctx: server.SimContext) -> None:
-    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True)
+    run_id = ctx.start_bt(NAV_LIVELOCK, None, 100, realtime_factor=1.0, print_every=0, policy_mode=True,
+                          blackboard=NAV_LIVELOCK_BLACKBOARD)
     robot = ctx.get_robot()
     old_runner, old_actions = run_threads(ctx, run_id)
     assert wait_until(lambda: robot.path_executor.following_path, 15.0)
@@ -388,14 +378,9 @@ def test_old_tree_never_writes_after_next_start(ctx: server.SimContext) -> None:
     assert {k: v for k, v in object_locations(ctx).items() if k.startswith("waste")} == waste_before
 
 
-@pytest.mark.parametrize(
-    "tree, node_name, status_key",
-    [(PICK_NONE, "pick_nothing", "/pick_status"), (PLACE_DICT_POSE, "place_dict_pose", "/place_status")],
-)
-def test_action_that_raises_fails_instead_of_hanging(
-    ctx: server.SimContext, tree: dict[str, Any], node_name: str, status_key: str
-) -> None:
-    run_id = ctx.start_bt(tree, None, 100, realtime_factor=5.0, print_every=0, timeout_s=60.0)
+def test_action_that_raises_fails_instead_of_hanging(ctx: server.SimContext) -> None:
+    node_name, status_key = "pick_nothing", "/pick_status"
+    run_id = ctx.start_bt(PICK_NONE, None, 100, realtime_factor=5.0, print_every=0, timeout_s=60.0)
     status = wait_final(ctx, run_id, 20.0)
     robot = ctx.get_robot()
     assert status["status"] == "FAILURE"
@@ -455,10 +440,14 @@ def test_http_endpoints(ctx: server.SimContext, monkeypatch: pytest.MonkeyPatch)
         with urllib.request.urlopen(base + "/live_runs", timeout=5) as response:
             assert json.loads(response.read())["live_runs"] == 0
 
+        # Trees are XML now; a JSON tree or a malformed blackboard is refused.
+        assert post("/run_bt", {"bt_json": {"root": {}}})[1] == {"error": "bt_xml_required"}
+        assert post("/run_bt", {"bt_xml": TRIVIAL_PLAN, "blackboard": []})[0] == 400
+
         code, body = post(
             "/run_bt",
-            {"bt_json": NAV_LIVELOCK, "tick_ms": 100, "realtime_factor": 1.0, "print_every": 0,
-             "policy_mode": True, "timeout_s": 30},
+            {"bt_xml": NAV_LIVELOCK, "blackboard": NAV_LIVELOCK_BLACKBOARD, "tick_ms": 100,
+             "realtime_factor": 1.0, "print_every": 0, "policy_mode": True, "timeout_s": 30},
         )
         assert code == 200
         run_id = body["run_id"]
@@ -474,13 +463,13 @@ def test_http_endpoints(ctx: server.SimContext, monkeypatch: pytest.MonkeyPatch)
         monkeypatch.setattr(server, "HALT_LIMIT_S", 0.2)
         monkeypatch.setattr(server, "CANCEL_JOIN_S", 0.5)
         slow_down(monkeypatch, "pick_object", 3.0)
-        code, body = post("/run_bt", {"bt_json": PICK_WASTE, "realtime_factor": 5.0, "print_every": 0})
+        code, body = post("/run_bt", {"bt_xml": PICK_WASTE, "realtime_factor": 5.0, "print_every": 0})
         assert code == 200
         robot = ctx.get_robot()
         assert wait_until(lambda: getattr(robot.current_action, "type", None) == "pick", 30.0)
         code, body = post("/reset_world", {"deterministic": True})
         assert code == 409 and body["live_runs"] == 1
-        code, body = post("/run_bt", {"bt_json": TRIVIAL_PLAN, "print_every": 0})
+        code, body = post("/run_bt", {"bt_xml": TRIVIAL_PLAN, "print_every": 0})
         assert code == 409
         code, body = post("/cancel_bt", {"all": True})
         assert code == 200 and body["still_alive"] == 1
@@ -528,6 +517,13 @@ class _FakeRobot:
         return result
 
 
+def _node(xml: str, robot: _FakeRobot) -> RobotActionBehavior:
+    """The single skill node of a one-node tree."""
+    node = build_pyrobosim_tree_from_xml(tree(xml), robot).root
+    assert isinstance(node, RobotActionBehavior)
+    return node
+
+
 def _tick_until_done(node: RobotActionBehavior, timeout_s: float = 5.0) -> py_trees.common.Status:
     end = time.monotonic() + timeout_s
     node.tick_once()
@@ -543,7 +539,7 @@ def test_behavior_releases_flags_when_action_raises(action_type: str) -> None:
         raise UnboundLocalError("local variable 'obj' referenced before assignment")
 
     robot = _FakeRobot(boom)
-    node = RobotActionBehavior("raiser", robot, action_type, outputs={"status": "raiser_status"})
+    node = _node(f'<{action_type} name="raiser" status="{{raiser_status}}"/>', robot)
     assert _tick_until_done(node) == py_trees.common.Status.FAILURE
     assert not robot.executing_action and not robot.executing_nav and robot.current_action is None
     assert py_trees.blackboard.Blackboard.storage["/raiser_status"] == ExecutionStatus.EXECUTION_FAILURE.name
@@ -559,7 +555,7 @@ def test_behavior_leaves_flags_it_does_not_own() -> None:
         raise AttributeError("'dict' object has no attribute 'x'")
 
     robot = _FakeRobot(boom)
-    node = RobotActionBehavior("raiser", robot, "place")
+    node = _node('<place name="raiser"/>', robot)
     assert _tick_until_done(node) == py_trees.common.Status.FAILURE
     assert robot.executing_action is True and robot.current_action is other
 
@@ -577,7 +573,7 @@ def test_interrupt_without_halt_request_keeps_old_behaviour() -> None:
         return ExecutionResult(status=status)
 
     robot = _FakeRobot(navigate_until_released)
-    node = RobotActionBehavior("nav", robot, "navigate", params={"target_location": "desk"})
+    node = _node('<navigate name="nav" target_location="desk"/>', robot)
     node.tick_once()
     assert wait_until(lambda: robot.executing_nav, 2.0)
 

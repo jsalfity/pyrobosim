@@ -3,10 +3,10 @@
 Execute a single BT on a running sim app server.
 
 Usage:
-    python3 -m pyrobosim.sim_app.run_bt_client <bt-file.json> [options]
+    python3 -m pyrobosim.sim_app.run_bt_client <bt-file.xml> [options]
 
 Example:
-    python3 -m pyrobosim.sim_app.run_bt_client generated/task_10_5ffbb8.json --realtime-factor 5
+    python3 -m pyrobosim.sim_app.run_bt_client generated/task_10_5ffbb8.xml --realtime-factor 5
 """
 
 import argparse
@@ -25,7 +25,7 @@ def main():
     parser.add_argument(
         "bt_file",
         type=Path,
-        help="Path to BT JSON file",
+        help="Path to BT XML file (py_trees BehaviorTree format)",
     )
     parser.add_argument(
         "--control-url",
@@ -49,6 +49,12 @@ def main():
         default=None,
         help="Robot name (default: use first robot)",
     )
+    parser.add_argument(
+        "--blackboard",
+        type=Path,
+        default=None,
+        help="Optional JSON file of initial blackboard values",
+    )
     args = parser.parse_args()
 
     # Load BT
@@ -57,11 +63,10 @@ def main():
         sys.exit(1)
 
     print(f"📄 Loading BT from: {args.bt_file}")
-    with open(args.bt_file) as f:
-        bt = json.load(f)
+    bt_xml = args.bt_file.read_text()
+    blackboard = json.loads(args.blackboard.read_text()) if args.blackboard else None
 
-    bt_name = bt.get("name", "Unnamed BT")
-    print(f"🤖 BT name: {bt_name}")
+    print(f"🤖 BT name: {args.bt_file.stem}")
     print(f"🌐 Control server: {args.control_url}")
     print(f"⚡ Realtime factor: {args.realtime_factor}x")
     print()
@@ -77,7 +82,8 @@ def main():
             args.control_url,
             "/run_bt",
             {
-                "bt_json": bt,
+                "bt_xml": bt_xml,
+                "blackboard": blackboard,
                 "robot": args.robot,
                 "tick_ms": 100,
                 "realtime_factor": args.realtime_factor,

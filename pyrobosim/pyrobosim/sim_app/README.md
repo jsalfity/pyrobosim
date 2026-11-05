@@ -27,7 +27,7 @@ This will:
 In a separate terminal:
 
 ```bash
-python -m pyrobosim.sim_app.run_bt_client path/to/behavior_tree.json --realtime-factor 5
+python -m pyrobosim.sim_app.run_bt_client path/to/behavior_tree.xml --realtime-factor 5
 ```
 
 This will:
@@ -41,12 +41,16 @@ This will:
 The control server exposes the following HTTP endpoints:
 
 ### `POST /run_bt`
-Execute a behavior tree.
+Execute a behavior tree written in py_trees BehaviorTree XML
+(`py_trees.parsers.behaviour_tree_xml`). Skills are tags (`<navigate target_location="pantry"/>`),
+blackboard checks are `<Check key="held_category" operator="==" value="bread"/>`; see
+`pyrobosim.behaviors.pytree_xml`. `blackboard` holds optional initial values.
 
 **Request:**
 ```json
 {
-  "bt_json": { ... },
+  "bt_xml": "<root main_tree_to_execute=\"Main\">...</root>",
+  "blackboard": {"key": "value"},
   "robot": "robot_name",
   "tick_ms": 100,
   "realtime_factor": 1.0,
@@ -173,7 +177,8 @@ Reload world from file.
 ### Client (`pyrobosim.sim_app.run_bt_client`)
 
 ```
-bt_file                  Path to BT JSON file (required)
+bt_file                  Path to BT XML file (required)
+--blackboard FILE        JSON file of initial blackboard values (optional)
 --control-url URL        Server URL (default: http://localhost:9001)
 --realtime-factor FLOAT  Simulation speed (default: 1.0)
 --timeout INT            Timeout in seconds (default: 60)
@@ -194,7 +199,7 @@ python -m pyrobosim.sim_app.server \
 ```bash
 cd /path/to/pyrobosim
 python -m pyrobosim.sim_app.run_bt_client \
-  /path/to/bt.json \
+  /path/to/bt.xml \
   --realtime-factor 10 \
   --timeout 120
 ```
@@ -232,7 +237,7 @@ python run_eval.py \
 ## Dependencies
 
 This module depends on:
-- `pyrobosim.behaviors.build_pyrobosim_tree_from_json` (from feature/json_bt_integration)
+- `pyrobosim.behaviors.build_pyrobosim_tree_from_xml`
 - `pyrobosim.core.World`, `WorldYamlLoader`
 - `pyrobosim.gui.start_gui`
-- `py_trees` for BT execution
+- `py_trees` (devel, for its XML parser) for BT execution

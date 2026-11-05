@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
 """Simple example: Run a behavior tree with GUI visualization.
 
-This example shows how to execute a BT JSON file with PyRoboSim
+This example shows how to execute a BT XML file with PyRoboSim
 while displaying the robot's movements in the GUI and printing
 the tree status to the console.
 
 Usage:
-    python run_bt_gui.py path/to/bt.json --world-file roscon_2024_workshop_world.yaml
+    python run_bt_gui.py path/to/bt.xml --world-file roscon_2024_workshop_world.yaml
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import threading
 import time
 from pathlib import Path
 
 from pyrobosim.core import WorldYamlLoader
 from pyrobosim.gui import start_gui
-from pyrobosim.behaviors import build_pyrobosim_tree_from_json
+from pyrobosim.behaviors import build_pyrobosim_tree_from_xml
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run BT with GUI")
-    parser.add_argument("bt_file", type=Path, help="Path to BT JSON file")
+    parser.add_argument("bt_file", type=Path, help="Path to BT XML file (py_trees BehaviorTree format)")
     parser.add_argument(
         "--world-file",
         type=str,
@@ -61,17 +60,17 @@ def main():
 
     world = WorldYamlLoader().from_yaml(str(world_file_path))
 
-    # Load BT JSON
+    # Load BT XML
     if not args.bt_file.exists():
         print(f"ERROR: BT file not found: {args.bt_file}")
         return
 
-    bt_json = json.loads(args.bt_file.read_text())
-    print(f"Loaded BT: {bt_json.get('name', 'Unnamed')}\n")
+    bt_xml = args.bt_file.read_text()
+    print(f"Loaded BT: {args.bt_file.stem}\n")
 
     # Build tree
-    tree = build_pyrobosim_tree_from_json(
-        bt_json,
+    tree = build_pyrobosim_tree_from_xml(
+        bt_xml,
         robot=world.robots[0],
         realtime_factor=args.realtime_factor,
     )

@@ -27,12 +27,12 @@ Generated BTs are saved to `./generated/` by default.
 
 **Headless (no GUI, fast):**
 ```bash
-python run_bt_headless.py ../../../generated/my_bt.json
+python run_bt_headless.py ../../../generated/my_bt.xml
 ```
 
 **With GUI (visual debugging):**
 ```bash
-python run_bt_gui.py ../../../generated/my_bt.json
+python run_bt_gui.py ../../../generated/my_bt.xml
 ```
 
 ## Example Workflow
@@ -47,20 +47,20 @@ claude  # then use MCP tools to generate BT
 
 # Terminal 3: Execute BT with GUI
 cd examples
-python run_bt_gui.py ../../../generated/fetch_apple.json
+python run_bt_gui.py ../../../generated/fetch_apple.xml
 ```
 
 ## Arguments
 
 ### run_bt_headless.py
 
-- `bt_file` - Path to BT JSON file (required)
+- `bt_file` - Path to BT XML file (required)
 - `--world-file` - World YAML (default: roscon_2024_workshop_world.yaml)
 - `--realtime-factor` - Simulation speed, 0.0 = instant (default: 0.0)
 
 ### run_bt_gui.py
 
-- `bt_file` - Path to BT JSON file (required)
+- `bt_file` - Path to BT XML file (required)
 - `--world-file` - World YAML (default: roscon_2024_workshop_world.yaml)
 - `--realtime-factor` - Simulation speed, 1.0 = realtime (default: 1.0)
 - `--tick-rate` - Seconds between tree ticks (default: 0.5)

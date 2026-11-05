@@ -7,7 +7,8 @@ Usage:
     python -m pyrobosim.sim_app.server --world-file roscon_2024_workshop_world.yaml --port 9001
 
 Endpoints:
-    POST /run_bt - Execute a behavior tree (optional timeout_s: server-side deadline)
+    POST /run_bt - Execute a behavior tree given as py_trees XML in bt_xml
+                   (optional blackboard: initial values; timeout_s: server-side deadline)
     POST /bt_status - Get status of a running BT
     POST /world_state - Get current world state (robot location, held object, objects)
     POST /world_entities - Get world vocabulary (locations, objects, categories)
@@ -38,8 +39,12 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import py_trees
-from pyrobosim.behaviors import RobotActionBehavior, build_pyrobosim_tree_from_json
-from pyrobosim.behaviors.pytree_json import cancel_navigation
+from pyrobosim.behaviors import (
+    RobotActionBehavior,
+    blackboard_keys,
+    build_pyrobosim_tree_from_xml,
+    cancel_navigation,
+)
 from pyrobosim.core import World, WorldYamlLoader
 from pyrobosim.gui import start_gui
 from pyrobosim.sim_app.world_entities import build_world_entities
@@ -96,29 +101,6 @@ def _json_safe(value: Any) -> Any:
             "success": bool(value.is_success()),
         }
     return repr(value)
-
-
-def _collect_blackboard_keys(node: dict[str, Any], keys: set[str]) -> None:
-    """Recursively collect blackboard keys from BT node."""
-    node_type = node.get("type")
-    if node_type == "action":
-        outputs = node.get("outputs", {})
-        if isinstance(outputs, dict):
-            for key in outputs.values():
-                if isinstance(key, str):
-                    keys.add(key)
-    if node_type == "condition":
-        key = node.get("key")
-        if isinstance(key, str):
-            keys.add(key)
-    if node_type == "decorator":
-        child = node.get("child")
-        if isinstance(child, dict):
-            _collect_blackboard_keys(child, keys)
-        return
-    for child in node.get("children", []):
-        if isinstance(child, dict):
-            _collect_blackboard_keys(child, keys)
 
 
 def _action_nodes(tree: py_trees.trees.BehaviourTree) -> list[RobotActionBehavior]:
@@ -308,7 +290,7 @@ class SimContext:
 
     def start_bt(
         self,
-        bt_json: dict[str, Any],
+        bt_xml: str,
         robot_name: str | None,
         tick_ms: int,
         realtime_factor: float = 1.0,
@@ -316,8 +298,12 @@ class SimContext:
         policy_mode: bool = False,
         max_ticks: int = 0,
         timeout_s: float = 0.0,
+        blackboard: dict[str, Any] | None = None,
     ) -> str:
         """Start a behavior tree execution in a background thread.
+
+        ``bt_xml`` is the tree in py_trees BehaviorTree XML. ``blackboard``
+        holds initial blackboard values, which XML has no place for.
 
         Two termination regimes, because plan-shaped and policy-shaped BTs mean
         different things by a SUCCESS at the root:
@@ -349,7 +335,7 @@ class SimContext:
         with self._exclusive("start a BT"):
             self._require_no_live_runs("start a BT")
             return self._start_bt_locked(
-                bt_json,
+                bt_xml,
                 robot_name,
                 tick_ms,
                 realtime_factor=realtime_factor,
@@ -357,11 +343,12 @@ class SimContext:
                 policy_mode=policy_mode,
                 max_ticks=max_ticks,
                 timeout_s=timeout_s,
+                blackboard=blackboard,
             )
 
     def _start_bt_locked(
         self,
-        bt_json: dict[str, Any],
+        bt_xml: str,
         robot_name: str | None,
         tick_ms: int,
         realtime_factor: float,
@@ -369,6 +356,7 @@ class SimContext:
         policy_mode: bool,
         max_ticks: int,
         timeout_s: float,
+        blackboard: dict[str, Any] | None,
     ) -> str:
         robot = self.get_robot(robot_name)
         # The blackboard is process-global and is not otherwise reset, so
@@ -376,19 +364,18 @@ class SimContext:
         # it. Detection results are the dangerous case: a stale
         # "<loc>_detections" entry can satisfy a condition in the next tree and
         # let it skip the detect that should have produced it. Clear before
-        # building, so the tree's own `blackboard.initial` seeding still wins.
+        # building, so the run's initial blackboard values still win.
         # (Blackboard writes happen only in update(), on a run's own ticking
         # thread, and every earlier run's thread has been joined above, so no
         # earlier tree can write here after this clear.)
         py_trees.blackboard.Blackboard.clear()
-        tree = build_pyrobosim_tree_from_json(bt_json, robot=robot, realtime_factor=realtime_factor)
+        tree = build_pyrobosim_tree_from_xml(
+            bt_xml, robot=robot, realtime_factor=realtime_factor, blackboard=blackboard
+        )
         actions = _action_nodes(tree)
         cancel_event = threading.Event()
         run_id = str(uuid.uuid4())
-        bb_keys: set[str] = set()
-        root_spec = bt_json.get("root")
-        if isinstance(root_spec, dict):
-            _collect_blackboard_keys(root_spec, bb_keys)
+        bb_keys = blackboard_keys(tree)
 
         def _on_tick(count: int) -> None:
             tree_text = ""
@@ -789,9 +776,13 @@ class ControlHandler(BaseHTTPRequestHandler):
             return
 
         # /run_bt endpoint
-        bt_json = data.get("bt_json")
-        if not isinstance(bt_json, dict):
-            self._send_json({"error": "bt_json_required"}, status=400)
+        bt_xml = data.get("bt_xml")
+        if not isinstance(bt_xml, str) or not bt_xml.strip():
+            self._send_json({"error": "bt_xml_required"}, status=400)
+            return
+        blackboard = data.get("blackboard")
+        if blackboard is not None and not isinstance(blackboard, dict):
+            self._send_json({"error": "blackboard must be an object"}, status=400)
             return
 
         robot = data.get("robot")
@@ -810,7 +801,7 @@ class ControlHandler(BaseHTTPRequestHandler):
             return
         try:
             run_id = self.context.start_bt(
-                bt_json,
+                bt_xml,
                 robot,
                 tick_ms,
                 realtime_factor=realtime_factor,
@@ -818,6 +809,7 @@ class ControlHandler(BaseHTTPRequestHandler):
                 policy_mode=policy_mode,
                 max_ticks=max_ticks,
                 timeout_s=timeout_s,
+                blackboard=blackboard,
             )
         except (RunStillAliveError, ControlBusyError) as exc:
             self._send_refused(exc)
