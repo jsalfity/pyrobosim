@@ -22,6 +22,11 @@ install_requires = [
     "numpy",
     "pycollada",
     "PySide6>=6.4.0",
+    # Behavior trees are built with py_trees' XML parser (pyrobosim.behaviors.pytree_xml).
+    # Pinned to an upstream devel commit because no release yet has two fixes it
+    # relies on: Any-typed output ports (#523) and Retry returning INVALID with an
+    # INVALID child (#519). Move to a version pin once a release includes both.
+    "py_trees @ git+https://github.com/splintered-reality/py_trees.git@49bcffd069afa2b7bd9ca7b0e7312f5cbb3640bd",
     "PyYAML",
     "shapely>=2.0.1",
     "scipy",
