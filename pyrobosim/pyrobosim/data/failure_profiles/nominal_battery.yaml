@@ -1,0 +1,15 @@
+# Nominal skill failures plus battery drain, for the suite100 R suite
+# (sim_app --failures nominal_battery with suite100_battery_world.yaml).
+# Success rates are copied from nominal.yaml. battery_usage is PyRoboSim's
+# own ExecutionOptions field: % per metre for navigate, % per call for the
+# other skills. Uncalibrated estimates: the house is about 8 m x 6 m and the
+# farthest drive to the charger is about 8 m straight-line (kitchen), so at
+# 1.5 %/m a robot at 30% can always reach it with more than 10% left, and a
+# full charge gives about 45 m before the next 30% crossing.
+action_execution_options:
+  navigate: {success_probability: 0.95, rng_seed: 1, battery_usage: 1.5}
+  pick: {success_probability: 0.90, rng_seed: 2, battery_usage: 0.5}
+  place: {success_probability: 0.95, rng_seed: 3, battery_usage: 0.5}
+  detect: {success_probability: 0.95, rng_seed: 4, battery_usage: 0.2}
+  open: {success_probability: 0.95, rng_seed: 5, battery_usage: 0.5}
+  close: {success_probability: 0.95, rng_seed: 6, battery_usage: 0.5}
